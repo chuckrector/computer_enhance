@@ -4,6 +4,9 @@
 
 #define MOV_REGISTER_TO_REGISTER  0x88 // 0b100010 00
 #define MOV_IMMEDIATE_TO_REGISTER 0xb0 // 0b1011 0 000
+#define MOV_IMMEDIATE_TO_REGISTER_OR_MEMORY 0xc6 // 0b1100011 0
+#define MOV_MEMORY_TO_ACCUMULATOR 0xa0 // 0b1010000 0
+#define MOV_ACCUMULATOR_TO_MEMORY 0xa2 // 0b1010001 0
 
 #define MEMORY_MODE_MAYBE_NO_DISPLACEMENT 0x00
 #define MEMORY_MODE_8BIT_DISPLACEMENT     0x01
@@ -39,7 +42,16 @@ static void PrintEffectiveAddress(int Register, int DisplacementValue)
     printf("[%s", EffectiveAddressLookup[Register]);
     if(DisplacementValue)
     {
-        printf(" + %d", DisplacementValue);
+        if(DisplacementValue < 0)
+        {
+            DisplacementValue *= -1;
+            printf(" - ");
+        }
+        else
+        {
+            printf(" + ");
+        }
+        printf("%d", DisplacementValue);
     }
     printf("]");
 }
@@ -67,13 +79,14 @@ int main(int ArgCount, char **Args)
             int Mode = InstructionPointer[1] >> 6; // MOD
             int Register = (InstructionPointer[1] & 0x38) >> 3; // REG
             int RegisterOrMemoryMode = InstructionPointer[1] & 0x07; // R/M
+
+            printf("mov ");
+
             if(Mode == REGISTER_MODE_NO_DISPLACEMENT)
             {
-                printf("mov ");
                 PrintRegister(RegisterOrMemoryMode, OperatesOnWordData);
                 printf(", ");
                 PrintRegister(Register, OperatesOnWordData);
-                printf("\n");
 
                 InstructionPointer += 2;
             }
@@ -81,7 +94,6 @@ int main(int ArgCount, char **Args)
             {
                 if(RegisterOrMemoryMode != 0x06)
                 {
-                    printf("mov ");
                     if(DirectionIsDestination)
                     {
                         PrintRegister(Register, OperatesOnWordData);
@@ -94,22 +106,42 @@ int main(int ArgCount, char **Args)
                         printf(", ");
                         PrintRegister(Register, OperatesOnWordData);
                     }
-                    printf("\n");
 
                     InstructionPointer += 2;
                 }
-                else
+                else // NOTE(chuck): Direct address
                 {
-                    printf("Direct address mode is not yet supported.\n");
-                    Result = 3;
+                    if(DirectionIsDestination)
+                    {
+                        PrintRegister(Register, OperatesOnWordData);
 
-                    InstructionPointer += 2;
+                        int Value = 0;
+                        if(OperatesOnWordData)
+                        {
+                            Value = *(unsigned short *)&InstructionPointer[2];
+                            InstructionPointer += 4;
+                        }
+                        else
+                        {
+                            Value = InstructionPointer[2];
+                            InstructionPointer += 3;
+                        }
+
+                        printf(", [%d]", Value);
+                    }
+                    else
+                    {
+                        PrintEffectiveAddress(RegisterOrMemoryMode, 0);
+                        printf(", ");
+                        
+                        printf("BRAAAA");
+                        // PrintRegister(Register, OperatesOnWordData);
+                        InstructionPointer += 2;
+                    }
                 }
             }
             else if((Mode == MEMORY_MODE_8BIT_DISPLACEMENT) || (Mode == MEMORY_MODE_16BIT_DISPLACEMENT))
             {
-                printf("mov ");
-
                 if(DirectionIsDestination)
                 {
                     PrintRegister(Register, OperatesOnWordData);
@@ -118,12 +150,12 @@ int main(int ArgCount, char **Args)
                     int DisplacementValue = 0;
                     if(Mode == MEMORY_MODE_16BIT_DISPLACEMENT)
                     {
-                        DisplacementValue = *(unsigned short *)&InstructionPointer[2];
+                        DisplacementValue = *(short *)&InstructionPointer[2];
                         InstructionPointer += 4;
                     }
                     else
                     {
-                        DisplacementValue = InstructionPointer[2];
+                        DisplacementValue = (char)InstructionPointer[2];
                         InstructionPointer += 3;
                     }
 
@@ -134,7 +166,7 @@ int main(int ArgCount, char **Args)
                     int DisplacementValue = 0;
                     if(Mode == MEMORY_MODE_16BIT_DISPLACEMENT)
                     {
-                        DisplacementValue = *(unsigned short *)&InstructionPointer[2];
+                        DisplacementValue = *(short *)&InstructionPointer[2];
                         InstructionPointer += 4;
                     }
                     else
@@ -147,16 +179,9 @@ int main(int ArgCount, char **Args)
                     printf(", ");
                     PrintRegister(Register, OperatesOnWordData);
                 }
-
-                printf("\n");
             }
-            else
-            {
-                printf("Unsupported MOV register mode: 0x%x\n", Mode);
-                Result = 2;
 
-                InstructionPointer += 2;
-            }
+            printf("\n");
         }
         else if((InstructionPointer[0] & 0xf0) == MOV_IMMEDIATE_TO_REGISTER)
         {
@@ -180,6 +205,133 @@ int main(int ArgCount, char **Args)
             }
 
             printf("%d\n", Value);
+        }
+        else if((InstructionPointer[0] & 0xfe) == MOV_IMMEDIATE_TO_REGISTER_OR_MEMORY)
+        {
+            int OperatesOnWordData = InstructionPointer[0] & 0x01; // W
+            int Mode = InstructionPointer[1] >> 6; // MOD
+            int RegisterOrMemoryMode = InstructionPointer[1] & 0x07; // R/M
+
+            printf("mov ");
+
+            if(Mode == REGISTER_MODE_NO_DISPLACEMENT)
+            {
+                PrintRegister(RegisterOrMemoryMode, OperatesOnWordData);
+                printf(", ");
+
+                if(OperatesOnWordData)
+                {
+                    int Value = *(unsigned short *)&InstructionPointer[2];
+                    printf("word %d", Value);
+
+                    InstructionPointer += 3;
+                }
+                else
+                {
+                    int Value = InstructionPointer[2];
+                    printf("byte %d", Value);
+
+                    InstructionPointer += 2;
+                }
+            }
+            else if(Mode == MEMORY_MODE_MAYBE_NO_DISPLACEMENT)
+            {
+                if(RegisterOrMemoryMode != 0x06)
+                {
+                    PrintEffectiveAddress(RegisterOrMemoryMode, 0);
+                    printf(", ");
+
+                    if(OperatesOnWordData)
+                    {
+                        int Value = *(unsigned short *)&InstructionPointer[2];
+                        printf("word %d", Value);
+
+                        InstructionPointer += 4;
+                    }
+                    else
+                    {
+                        int Value = InstructionPointer[2];
+                        printf("byte %d", Value);
+
+                        InstructionPointer += 3;
+                    }
+                }
+                else
+                {
+                    printf("Direct address mode is not yet supported (reg/mem).\n");
+                    Result = 3;
+
+                    InstructionPointer += 2;
+                }
+            }
+            else if((Mode == MEMORY_MODE_8BIT_DISPLACEMENT) || (Mode == MEMORY_MODE_16BIT_DISPLACEMENT))
+            {
+                int DisplacementValue = 0;
+                if(Mode == MEMORY_MODE_16BIT_DISPLACEMENT)
+                {
+                    DisplacementValue = *(short *)&InstructionPointer[2];
+                }
+                else
+                {
+                    DisplacementValue = (char)InstructionPointer[2];
+                }
+
+                PrintEffectiveAddress(RegisterOrMemoryMode, DisplacementValue);
+                printf(", ");
+
+                if(OperatesOnWordData)
+                {
+                    int Value = *(unsigned short *)&InstructionPointer[4];
+                    printf("word %d", Value);
+
+                    InstructionPointer += 6;
+                }
+                else
+                {
+                    int Value = InstructionPointer[4];
+                    printf("byte %d", Value);
+
+                    InstructionPointer += 5;
+                }
+            }
+
+            printf("\n");
+        }
+        else if((InstructionPointer[0] & 0xfe) == MOV_MEMORY_TO_ACCUMULATOR)
+        {
+            int OperatesOnWordData = InstructionPointer[0] & 0x01; // W
+
+            int Value = 0;
+            if(OperatesOnWordData)
+            {
+                Value = *(unsigned short *)&InstructionPointer[1];
+                InstructionPointer += 3;
+            }
+            else
+            {
+                Value = InstructionPointer[1];
+                InstructionPointer += 2;
+            }
+
+            printf("mov ax, [%d]\n", Value);
+        }
+        else if((InstructionPointer[0] & 0xfe) == MOV_ACCUMULATOR_TO_MEMORY)
+        {
+            int OperatesOnWordData = InstructionPointer[0] & 0x01; // W
+
+            int Value = 0;
+            if(OperatesOnWordData)
+            {
+                Value = *(unsigned short *)&InstructionPointer[1];
+                InstructionPointer += 3;
+            }
+            else
+            {
+                Value = InstructionPointer[1];
+                InstructionPointer += 2;
+            }
+
+            printf("mov [%d], ax\n", Value);
         }
         else
         {
