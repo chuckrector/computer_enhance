@@ -1,7 +1,20 @@
 #include <stdio.h>
 
 #define Assert(Condition) if(!Condition) { __debugbreak(); }
-#define OPCODE_MOV_REG_TO_REG 0x88
+#define MOV_REG_TO_REG 0x88
+#define REGISTER_MODE 0xc0
+
+static char *RegisterLookup[16] =
+{
+    "al", "cl", "dl", "bl", "ah", "ch", "dh", "bh",
+    "ax", "cx", "dx", "bx", "sp", "bp", "si", "di"
+};
+
+static void PrintRegister(int RegisterCode, int OperatesOnWordData)
+{
+    char *RegisterName = RegisterLookup[(OperatesOnWordData * 8) + RegisterCode];
+    printf("%s", RegisterName);
+}
 
 int main(int ArgCount, char **Args)
 {
@@ -12,6 +25,8 @@ int main(int ArgCount, char **Args)
     char *Filename = Args[1];
     FILE *File = fopen(Filename, "rb");
     size_t ByteLength = fread(Data, 1, 1024, File);
+    
+    printf("bits 16\n");
 
     unsigned char *InstructionPointer = Data;
     unsigned char *EndOfData = Data + ByteLength;
@@ -20,15 +35,27 @@ int main(int ArgCount, char **Args)
         InstructionPointer += 2)
     {
         int OpCode = InstructionPointer[0] & 0xfc;
-        int RegisterOperandIsDestination = InstructionPointer[0] & 0x02;
+        int DirectionIsDestination = InstructionPointer[0] & 0x02;
         int OperatesOnWordData = InstructionPointer[0] & 0x01;
-        int RegisterMode = InstructionPointer[1] & 0xc0;
-        int RegisterOperand = InstructionPointer[1] & 0x38;
-        int RegisterMemory = InstructionPointer[1] & 0x07;
-
-        if(OpCode == OPCODE_MOV_REG_TO_REG)
+        int Mode = InstructionPointer[1] & 0xc0;
+        int RegisterOne = (InstructionPointer[1] & 0x38) >> 3;
+        int RegisterTwo = InstructionPointer[1] & 0x07;
+        
+        if(OpCode == MOV_REG_TO_REG)
         {
-            printf("mov ??, ??\n");
+            if(Mode == REGISTER_MODE)
+            {
+                printf("mov ");
+                PrintRegister(RegisterTwo, OperatesOnWordData);
+                printf(", ");
+                PrintRegister(RegisterOne, OperatesOnWordData);
+                printf("\n");
+            }
+            else
+            {
+                printf("Unsupported MOV register mode: 0x%x\n", Mode);
+                Result = 2;
+            }
         }
         else
         {
