@@ -53,6 +53,18 @@ static char *RegisterLookup[16] =
     "ax", "cx", "dx", "bx", "sp", "bp", "si", "di"
 };
 
+#define SEGMENT_REGISTER_NAME_ES 0
+#define SEGMENT_REGISTER_NAME_CS 0
+#define SEGMENT_REGISTER_NAME_SS 0
+#define SEGMENT_REGISTER_NAME_DS 0
+static char *SegmentRegisterLookup[4] =
+{
+    "es",
+    "cs",
+    "ss",
+    "ds",
+};
+
 typedef enum
 {
     Param_Unknown,
@@ -60,6 +72,7 @@ typedef enum
     Param_Register,
     Param_Memory,
     Param_MemoryDirectAddress,
+    Param_SegmentRegister,
 } param_type;
 
 typedef struct
@@ -89,7 +102,11 @@ typedef struct
     };
     int Word;
     int Mode;
-    int RegA;
+    union
+    {
+        int RegA;
+        int Ext;
+    };
     int RegB;
     int EmitSize;
     int IsRelativeJump;
@@ -102,6 +119,7 @@ typedef struct
 #define OP_NAME_ADD 2
 #define OP_NAME_SUB 3
 #define OP_NAME_CMP 4
+
 #define OP_NAME_JE 5
 #define OP_NAME_JL 6
 #define OP_NAME_JLE 7
@@ -123,7 +141,11 @@ typedef struct
 #define OP_NAME_LOOPNZ 23
 #define OP_NAME_JCXZ 24
 
-static char *OpNameLookup[100] =
+#define OP_NAME_PUSH 25
+#define OP_NAME_POP 26
+#define OP_NAME_XCHG 27
+
+static char *OpNameLookup[] =
 {
     "<unknown>",
     "mov",
@@ -150,7 +172,17 @@ static char *OpNameLookup[100] =
     "loopz",
     "loopnz",
     "jcxz",
+    "push",
+    "pop",
+    "xchg",
 };
+
+// NOTE(chuck): Annoyingly, you cannot pass a struct literal as a function argument without casting it. So use a relativelyt short name here and stuff all possible options for all functions into this.
+typedef struct
+{
+    int SignExtend;
+    int NameIndex;
+} options;
 
 typedef struct
 {
@@ -159,14 +191,9 @@ typedef struct
     int Prefix;
     int UseExtension;
     int Extension;
-    op (*Decode)(u8 *IP);
+    op (*Decode)(u8 *IP, options Options);
+    options DecodeOptions;
 } op_definition;
-
-// NOTE(chuck): Annoyingly, you cannot pass a struct literal as a function argument without casting it. So use a relativelyt short name here and stuff all possible options for all functions into this.
-typedef struct
-{
-    int SignExtend;
-} options;
 
 static int GetRegisterIndex(int RegisterCode, int IsWord)
 {
@@ -326,7 +353,7 @@ static void SharedRegisterOrMemoryVsRegister(u8 *IP, op *Op)
 }
 
 // ::: 1 0 0 0 1 0 d w | mod  reg   r/m  |    (DISP-LO)    |    (DISP-HI)    |
-static op MovRegisterOrMemoryToOrFromRegister(u8 *IP)
+static op MovRegisterOrMemoryToOrFromRegister(u8 *IP, options DecodeOptions)
 {
     op Op = {OP_NAME_MOV, IP, 2, 0};
     SetOpConfig(&Op);
@@ -342,7 +369,7 @@ static void SharedImmediateToRegister(u8 *IP, op *Op, int RegisterIndex, options
 }
 
 // ::: 1 0 1 1 w  reg  |      data       |   data if w=1   |
-static op MovImmediateToRegister(u8 *IP)
+static op MovImmediateToRegister(u8 *IP, options DecodeOptions)
 {
     op Op = {OP_NAME_MOV, IP, 2, 0};
     Op.Word = IP[0] & 0b00001000;
@@ -386,7 +413,7 @@ static void SharedImmediateToRegisterOrMemory(u8 *IP, op *Op, options Options)
 }
 
 // ::: 1 1 0 0 0 1 1 w | mod 0 0 0  r/m  | (DISP-LO) | (DISP-HI) | data | data if w=1 |
-static op MovImmediateToRegisterOrMemory(u8 *IP)
+static op MovImmediateToRegisterOrMemory(u8 *IP, options DecodeOptions)
 {
     op Op = {OP_NAME_MOV, IP, 2, 0};
     SetOpConfig(&Op);
@@ -395,7 +422,7 @@ static op MovImmediateToRegisterOrMemory(u8 *IP)
 }
 
 // ::: 1 0 1 0 0 0 0 w |     addr-lo     |     addr-hi     |
-static op MovMemoryToAccumulator(u8 *IP)
+static op MovMemoryToAccumulator(u8 *IP, options DecodeOptions)
 {
     op Op = {OP_NAME_MOV, IP, 2, 0};
     SetOpConfig(&Op);
@@ -406,7 +433,7 @@ static op MovMemoryToAccumulator(u8 *IP)
 }
 
 // ::: 1 0 1 0 0 0 1 w |     addr-lo     |     addr-hi     |
-static op MovAccumulatorToMemory(u8 *IP)
+static op MovAccumulatorToMemory(u8 *IP, options DecodeOptions)
 {
     op Op = {OP_NAME_MOV, IP, 2, 0};
     Op.Word = IP[0] & 1;
@@ -417,78 +444,26 @@ static op MovAccumulatorToMemory(u8 *IP)
 }
 
 // ::: 0 0 0 0 0 0 d w | mod  reg   r/m  |    (DISP-LO)    |    (DISP-HI)    |
-static op AddRegisterOrMemoryWithRegisterToEither(u8 *IP)
+static op AddSubCmp_RegisterOrMemoryWithRegisterToEither(u8 *IP, options DecodeOptions)
 {
-    op Op = {OP_NAME_ADD, IP, 2, 0};
+    op Op = {DecodeOptions.NameIndex, IP, 2, 0};
     SetOpConfig(&Op);
     SharedRegisterOrMemoryVsRegister(IP, &Op);
     return(Op);
 }
 
 // ::: 1 0 0 0 0 0 s w | mod 0 0 0  r/m  | (DISP-LO) | (DISP-HI) | data | data if w=1 |
-static op AddImmediateToRegisterOrMemory(u8 *IP)
+static op AddSubCmp_ImmediateWithRegisterOrMemory(u8 *IP, options DecodeOptions)
 {
-    op Op = {OP_NAME_ADD, IP, 2, 0};
+    op Op = {DecodeOptions.NameIndex, IP, 2, 0};
     SetOpConfig(&Op);
     SharedImmediateToRegisterOrMemory(IP, &Op, (options){.SignExtend = 1});
     return(Op);
 }
 
-static op AddImmediateToAccumulator(u8 *IP)
+static op AddSubCmp_ImmediateWithAccumulator(u8 *IP, options DecodeOptions)
 {
-    op Op = {OP_NAME_ADD, IP, 2, 0};
-    Op.Word = IP[0] & 0b00000001;
-    SharedImmediateToRegister(IP, &Op,
-                              Op.Word ? REGISTER_NAME_AX : REGISTER_NAME_AL,
-                              (options){.SignExtend = Op.Word ? 0 : 1});
-    return(Op);
-}
-
-static op SubRegisterOrMemoryWithRegisterToEither(u8 *IP)
-{
-    op Op = {OP_NAME_SUB, IP, 2, 0};
-    SetOpConfig(&Op);
-    SharedRegisterOrMemoryVsRegister(IP, &Op);
-    return(Op);
-}
-
-static op SubImmediateFromRegisterOrMemory(u8 *IP)
-{
-    op Op = {OP_NAME_SUB, IP, 2, 0};
-    SetOpConfig(&Op);
-    SharedImmediateToRegisterOrMemory(IP, &Op, (options){.SignExtend = 1});
-    return(Op);
-}
-
-static op SubImmediateFromAccumulator(u8 *IP)
-{
-    op Op = {OP_NAME_SUB, IP, 2, 0};
-    Op.Word = IP[0] & 0b00000001;
-    SharedImmediateToRegister(IP, &Op,
-                              Op.Word ? REGISTER_NAME_AX : REGISTER_NAME_AL,
-                              (options){.SignExtend = Op.Word ? 0 : 1});
-    return(Op);
-}
-
-static op CmpRegisterOrMemoryWithRegisterToEither(u8 *IP)
-{
-    op Op = {OP_NAME_CMP, IP, 2, 0};
-    SetOpConfig(&Op);
-    SharedRegisterOrMemoryVsRegister(IP, &Op);
-    return(Op);
-}
-
-static op CmpImmediateWithRegisterOrMemory(u8 *IP)
-{
-    op Op = {OP_NAME_CMP, IP, 2, 0};
-    SetOpConfig(&Op);
-    SharedImmediateToRegisterOrMemory(IP, &Op, (options){.SignExtend = 1});
-    return(Op);
-}
-
-static op CmpImmediateWithAccumulator(u8 *IP)
-{
-    op Op = {OP_NAME_CMP, IP, 2, 0};
+    op Op = {DecodeOptions.NameIndex, IP, 2, 0};
     Op.Word = IP[0] & 0b00000001;
     SharedImmediateToRegister(IP, &Op,
                               Op.Word ? REGISTER_NAME_AX : REGISTER_NAME_AL,
@@ -507,67 +482,135 @@ static op SharedRelativeJump(u8 *IP, int NameIndex)
 }
 
 // TODO(chuck): Make a single handler for these kinda things? This is kinda tedious and annoying.
-static op Je(u8 *IP)     { return SharedRelativeJump(IP, OP_NAME_JE);  }
-static op Jl(u8 *IP)     { return SharedRelativeJump(IP, OP_NAME_JL);  }
-static op Jle(u8 *IP)    { return SharedRelativeJump(IP, OP_NAME_JLE); }
-static op Jb(u8 *IP)     { return SharedRelativeJump(IP, OP_NAME_JB);  }
-static op Jbe(u8 *IP)    { return SharedRelativeJump(IP, OP_NAME_JBE); }
-static op Jp(u8 *IP)     { return SharedRelativeJump(IP, OP_NAME_JP);  }
-static op Jo(u8 *IP)     { return SharedRelativeJump(IP, OP_NAME_JO);  }
-static op Js(u8 *IP)     { return SharedRelativeJump(IP, OP_NAME_JS);  }
-static op Jnz(u8 *IP)    { return SharedRelativeJump(IP, OP_NAME_JNZ); }
-static op Jnl(u8 *IP)    { return SharedRelativeJump(IP, OP_NAME_JNL); }
-static op Jg(u8 *IP)     { return SharedRelativeJump(IP, OP_NAME_JG);  }
-static op Jnb(u8 *IP)    { return SharedRelativeJump(IP, OP_NAME_JNB); }
-static op Ja(u8 *IP)     { return SharedRelativeJump(IP, OP_NAME_JA);  }
-static op Jnp(u8 *IP)    { return SharedRelativeJump(IP, OP_NAME_JNP); }
-static op Jno(u8 *IP)    { return SharedRelativeJump(IP, OP_NAME_JNO); }
-static op Jns(u8 *IP)    { return SharedRelativeJump(IP, OP_NAME_JNS); }
-static op Loop(u8 *IP)   { return SharedRelativeJump(IP, OP_NAME_LOOP);   }
-static op Loopz(u8 *IP)  { return SharedRelativeJump(IP, OP_NAME_LOOPZ);  }
-static op Loopnz(u8 *IP) { return SharedRelativeJump(IP, OP_NAME_LOOPNZ); }
-static op Jcxz(u8 *IP)   { return SharedRelativeJump(IP, OP_NAME_JCXZ);   }
+static op Je(u8 *IP, options DecodeOptions)     { return SharedRelativeJump(IP, OP_NAME_JE);  }
+static op Jl(u8 *IP, options DecodeOptions)     { return SharedRelativeJump(IP, OP_NAME_JL);  }
+static op Jle(u8 *IP, options DecodeOptions)    { return SharedRelativeJump(IP, OP_NAME_JLE); }
+static op Jb(u8 *IP, options DecodeOptions)     { return SharedRelativeJump(IP, OP_NAME_JB);  }
+static op Jbe(u8 *IP, options DecodeOptions)    { return SharedRelativeJump(IP, OP_NAME_JBE); }
+static op Jp(u8 *IP, options DecodeOptions)     { return SharedRelativeJump(IP, OP_NAME_JP);  }
+static op Jo(u8 *IP, options DecodeOptions)     { return SharedRelativeJump(IP, OP_NAME_JO);  }
+static op Js(u8 *IP, options DecodeOptions)     { return SharedRelativeJump(IP, OP_NAME_JS);  }
+static op Jnz(u8 *IP, options DecodeOptions)    { return SharedRelativeJump(IP, OP_NAME_JNZ); }
+static op Jnl(u8 *IP, options DecodeOptions)    { return SharedRelativeJump(IP, OP_NAME_JNL); }
+static op Jg(u8 *IP, options DecodeOptions)     { return SharedRelativeJump(IP, OP_NAME_JG);  }
+static op Jnb(u8 *IP, options DecodeOptions)    { return SharedRelativeJump(IP, OP_NAME_JNB); }
+static op Ja(u8 *IP, options DecodeOptions)     { return SharedRelativeJump(IP, OP_NAME_JA);  }
+static op Jnp(u8 *IP, options DecodeOptions)    { return SharedRelativeJump(IP, OP_NAME_JNP); }
+static op Jno(u8 *IP, options DecodeOptions)    { return SharedRelativeJump(IP, OP_NAME_JNO); }
+static op Jns(u8 *IP, options DecodeOptions)    { return SharedRelativeJump(IP, OP_NAME_JNS); }
+static op Loop(u8 *IP, options DecodeOptions)   { return SharedRelativeJump(IP, OP_NAME_LOOP);   }
+static op Loopz(u8 *IP, options DecodeOptions)  { return SharedRelativeJump(IP, OP_NAME_LOOPZ);  }
+static op Loopnz(u8 *IP, options DecodeOptions) { return SharedRelativeJump(IP, OP_NAME_LOOPNZ); }
+static op Jcxz(u8 *IP, options DecodeOptions)   { return SharedRelativeJump(IP, OP_NAME_JCXZ);   }
 
-static op_definition OpTable[34] =
+static op PushPop_RegisterOrMemory(u8 *IP, options DecodeOptions)
 {
-    {OP_NAME_MOV,    0b11111100, 0b10001000, 0, 0, MovRegisterOrMemoryToOrFromRegister},
-    {OP_NAME_MOV,    0b11110000, 0b10110000, 0, 0, MovImmediateToRegister},
-    {OP_NAME_MOV,    0b11111110, 0b11000110, 0, 0, MovImmediateToRegisterOrMemory},
-    {OP_NAME_MOV,    0b11111110, 0b10100000, 0, 0, MovMemoryToAccumulator},
-    {OP_NAME_MOV,    0b11111110, 0b10100010, 0, 0, MovAccumulatorToMemory},
+    op Op = {DecodeOptions.NameIndex, IP, 1, 0};
+    SetOpConfig(&Op);
 
-    {OP_NAME_ADD,    0b11111100, 0b00000000, 0, 0, AddRegisterOrMemoryWithRegisterToEither},
-    {OP_NAME_ADD,    0b11111000, 0b10000000, 1, 0b000, AddImmediateToRegisterOrMemory},
-    {OP_NAME_ADD,    0b11111110, 0b00000100, 0, 0, AddImmediateToAccumulator},
+    if(Op.Mode == REGISTER_MODE_NO_DISPLACEMENT)
+    {
+        SetParamToReg(IP, &Op, DESTINATION, GetRegisterIndex(Op.RegB, 1));
+        Op.ByteLength = 2;
+    }
+    else if(Op.Mode == MEMORY_MODE_MAYBE_NO_DISPLACEMENT)
+    {
+        if(Op.RegB != 0x06)
+        {
+            SetParamToMem(IP + 2, &Op, DESTINATION, Op.RegB, 0, 0, 0);
+            Op.EmitSize = 1;
+            Op.ByteLength = 2;
+        }
+        else // NOTE(chuck): Direct address
+        {
+            SetParamToMemDirectAddress(IP + 2, &Op, DESTINATION, 1);
+            Op.ByteLength = 4;
+            Op.EmitSize = 1;
+        }
+    }
+    else if((Op.Mode == MEMORY_MODE_8BIT_DISPLACEMENT) ||
+            (Op.Mode == MEMORY_MODE_16BIT_DISPLACEMENT))
+    {
+        int WordDisplacement = (Op.Mode == MEMORY_MODE_16BIT_DISPLACEMENT);
+        Op.ByteLength = WordDisplacement ? 4 : 3;
+        SetParamToMem(IP + 2, &Op, DESTINATION, Op.RegB, 1, WordDisplacement, 1);
+        Op.EmitSize = 1;
+    }
 
-    {OP_NAME_SUB,    0b11111100, 0b00101000, 0, 0, SubRegisterOrMemoryWithRegisterToEither},
-    {OP_NAME_SUB,    0b11111000, 0b10000000, 1, 0b101, SubImmediateFromRegisterOrMemory},
-    {OP_NAME_SUB,    0b11111110, 0b00101100, 0, 0, SubImmediateFromAccumulator},
+    return(Op);
+}
 
-    {OP_NAME_CMP,    0b11111100, 0b00111000, 0, 0, CmpRegisterOrMemoryWithRegisterToEither},
-    {OP_NAME_CMP,    0b11111000, 0b10000000, 1, 0b111, CmpImmediateWithRegisterOrMemory},
-    {OP_NAME_CMP,    0b11111110, 0b00111100, 0, 0, CmpImmediateWithAccumulator},
+static op PushPop_Register(u8 *IP, options DecodeOptions)
+{
+    op Op = {DecodeOptions.NameIndex, IP, 1, 0};
+    int Register = IP[0] & 0b111;
+    SetParamToReg(IP, &Op, DESTINATION, GetRegisterIndex(Register, 1));
+    Op.ByteLength = 1;
+    return(Op);
+}
 
-    {OP_NAME_JE,     0b11111111, 0b01110100, 0, 0, Je},
-    {OP_NAME_JL,     0b11111111, 0b01111100, 0, 0, Jl},
-    {OP_NAME_JLE,    0b11111111, 0b01111110, 0, 0, Jle},
-    {OP_NAME_JB,     0b11111111, 0b01110010, 0, 0, Jb},
-    {OP_NAME_JBE,    0b11111111, 0b01110110, 0, 0, Jbe},
-    {OP_NAME_JP,     0b11111111, 0b01111010, 0, 0, Jp},
-    {OP_NAME_JO,     0b11111111, 0b01110000, 0, 0, Jo},
-    {OP_NAME_JS,     0b11111111, 0b01111000, 0, 0, Js},
-    {OP_NAME_JNZ,    0b11111111, 0b01110101, 0, 0, Jnz},
-    {OP_NAME_JNL,    0b11111111, 0b01111101, 0, 0, Jnl},
-    {OP_NAME_JG,     0b11111111, 0b01111111, 0, 0, Jg},
-    {OP_NAME_JNB,    0b11111111, 0b01110011, 0, 0, Jnb},
-    {OP_NAME_JA,     0b11111111, 0b01110111, 0, 0, Ja},
-    {OP_NAME_JNP,    0b11111111, 0b01111011, 0, 0, Jnp},
-    {OP_NAME_JNO,    0b11111111, 0b01110001, 0, 0, Jno},
-    {OP_NAME_JNS,    0b11111111, 0b01111001, 0, 0, Jns},
-    {OP_NAME_LOOP,   0b11111111, 0b11100010, 0, 0, Loop},
-    {OP_NAME_LOOPZ , 0b11111111, 0b11100001, 0, 0, Loopz},
-    {OP_NAME_LOOPNZ, 0b11111111, 0b11100000, 0, 0, Loopnz},
-    {OP_NAME_JCXZ,   0b11111111, 0b11100011, 0, 0, Jcxz},
+static op PushPop_SegmentRegister(u8 *IP, options DecodeOptions)
+{
+    op Op = {DecodeOptions.NameIndex, IP, 1, 0};
+    int SegmentRegister = (IP[0] & 0b00011000) >> 3;
+    Op.Param[DESTINATION].Type = Param_SegmentRegister;
+    Op.Param[DESTINATION].RegisterOrMemoryIndex = SegmentRegister;
+    Op.ByteLength = 1;
+    return(Op);
+}
+
+static op_definition OpTable[] =
+{
+    // TODO(chuck): There is order-dependence here! AddSubCmp_ImmediateWithRegisterOrMemory will fire first if XCHG is listed after it, which is no bueno. I assume this means that I have to order all these encodings by largest prefix and descending, then misc. splotchy masks. Hopefully that works for everything? There's probably a better way to handle this then the prefix masking, such that there is no ambiguity related to ordering.
+    // TODO(chuck): Table 4-14. Machine Instruction Encoding Matrix looks interesting but I don't understand how to read it.
+    {OP_NAME_XCHG,   0b11111110, 0b10000110, 0, 0, AddSubCmp_RegisterOrMemoryWithRegisterToEither, {.NameIndex=OP_NAME_XCHG}},
+
+    {OP_NAME_MOV,    0b11111100, 0b10001000, 0, 0, MovRegisterOrMemoryToOrFromRegister, {0}},
+    {OP_NAME_MOV,    0b11110000, 0b10110000, 0, 0, MovImmediateToRegister, {0}},
+    {OP_NAME_MOV,    0b11111110, 0b11000110, 0, 0, MovImmediateToRegisterOrMemory, {0}},
+    {OP_NAME_MOV,    0b11111110, 0b10100000, 0, 0, MovMemoryToAccumulator, {0}},
+    {OP_NAME_MOV,    0b11111110, 0b10100010, 0, 0, MovAccumulatorToMemory, {0}},
+
+    {OP_NAME_ADD,    0b11111100, 0b00000000, 0, 0,     AddSubCmp_RegisterOrMemoryWithRegisterToEither, {.NameIndex=OP_NAME_ADD}},
+    {OP_NAME_ADD,    0b11111000, 0b10000000, 1, 0b000, AddSubCmp_ImmediateWithRegisterOrMemory,        {.NameIndex=OP_NAME_ADD}},
+    {OP_NAME_ADD,    0b11111110, 0b00000100, 0, 0,     AddSubCmp_ImmediateWithAccumulator,             {.NameIndex=OP_NAME_ADD}},
+
+    {OP_NAME_SUB,    0b11111100, 0b00101000, 0, 0,     AddSubCmp_RegisterOrMemoryWithRegisterToEither, {.NameIndex=OP_NAME_SUB}},
+    {OP_NAME_SUB,    0b11111000, 0b10000000, 1, 0b101, AddSubCmp_ImmediateWithRegisterOrMemory,        {.NameIndex=OP_NAME_SUB}},
+    {OP_NAME_SUB,    0b11111110, 0b00101100, 0, 0,     AddSubCmp_ImmediateWithAccumulator,             {.NameIndex=OP_NAME_SUB}},
+
+    {OP_NAME_CMP,    0b11111100, 0b00111000, 0, 0,     AddSubCmp_RegisterOrMemoryWithRegisterToEither, {.NameIndex=OP_NAME_CMP}},
+    {OP_NAME_CMP,    0b11111000, 0b10000000, 1, 0b111, AddSubCmp_ImmediateWithRegisterOrMemory,        {.NameIndex=OP_NAME_CMP}},
+    {OP_NAME_CMP,    0b11111110, 0b00111100, 0, 0,     AddSubCmp_ImmediateWithAccumulator,             {.NameIndex=OP_NAME_CMP}},
+
+    {OP_NAME_JE,     0b11111111, 0b01110100, 0, 0, Je, {0}},
+    {OP_NAME_JL,     0b11111111, 0b01111100, 0, 0, Jl, {0}},
+    {OP_NAME_JLE,    0b11111111, 0b01111110, 0, 0, Jle, {0}},
+    {OP_NAME_JB,     0b11111111, 0b01110010, 0, 0, Jb, {0}},
+    {OP_NAME_JBE,    0b11111111, 0b01110110, 0, 0, Jbe, {0}},
+    {OP_NAME_JP,     0b11111111, 0b01111010, 0, 0, Jp, {0}},
+    {OP_NAME_JO,     0b11111111, 0b01110000, 0, 0, Jo, {0}},
+    {OP_NAME_JS,     0b11111111, 0b01111000, 0, 0, Js, {0}},
+    {OP_NAME_JNZ,    0b11111111, 0b01110101, 0, 0, Jnz, {0}},
+    {OP_NAME_JNL,    0b11111111, 0b01111101, 0, 0, Jnl, {0}},
+    {OP_NAME_JG,     0b11111111, 0b01111111, 0, 0, Jg, {0}},
+    {OP_NAME_JNB,    0b11111111, 0b01110011, 0, 0, Jnb, {0}},
+    {OP_NAME_JA,     0b11111111, 0b01110111, 0, 0, Ja, {0}},
+    {OP_NAME_JNP,    0b11111111, 0b01111011, 0, 0, Jnp, {0}},
+    {OP_NAME_JNO,    0b11111111, 0b01110001, 0, 0, Jno, {0}},
+    {OP_NAME_JNS,    0b11111111, 0b01111001, 0, 0, Jns, {0}},
+    {OP_NAME_LOOP,   0b11111111, 0b11100010, 0, 0, Loop, {0}},
+    {OP_NAME_LOOPZ , 0b11111111, 0b11100001, 0, 0, Loopz, {0}},
+    {OP_NAME_LOOPNZ, 0b11111111, 0b11100000, 0, 0, Loopnz, {0}},
+    {OP_NAME_JCXZ,   0b11111111, 0b11100011, 0, 0, Jcxz, {0}},
+
+    {OP_NAME_PUSH,   0b11111111, 0b11111111, 1, 0b110, PushPop_RegisterOrMemory, {.NameIndex=OP_NAME_PUSH}},
+    {OP_NAME_PUSH,   0b11111000, 0b01010000, 0, 0,     PushPop_Register,         {.NameIndex=OP_NAME_PUSH}},
+    {OP_NAME_PUSH,   0b11100111, 0b00000110, 0, 0,     PushPop_SegmentRegister,  {.NameIndex=OP_NAME_PUSH}},
+
+    {OP_NAME_POP,    0b11111111, 0b10001111, 1, 0b000, PushPop_RegisterOrMemory, {.NameIndex=OP_NAME_POP}},
+    {OP_NAME_POP,    0b11111000, 0b01011000, 0, 0,     PushPop_Register,         {.NameIndex=OP_NAME_POP}},
+    {OP_NAME_POP,    0b11100111, 0b00000111, 0, 0,     PushPop_SegmentRegister,  {.NameIndex=OP_NAME_POP}},
 };
 
 static char *EffectiveAddressLookup[8] =
@@ -603,6 +646,11 @@ static int PrintParam(char *OutputInit, op_param *Param)
         case Param_Register:
         {
             EMIT("%s", RegisterLookup[Param->RegisterOrMemoryIndex]);
+        } break;
+
+        case Param_SegmentRegister:
+        {
+            EMIT("%s", SegmentRegisterLookup[Param->RegisterOrMemoryIndex]);
         } break;
 
         case Param_Memory:
@@ -705,13 +753,13 @@ int main(int ArgCount, char **Args)
                     int OpCodeExtension = ((IP[1] & 0b00111000) >> 3);
                     if(OpCodeExtension == OpDefinition->Extension)
                     {
-                        Op = OpDefinition->Decode(IP);
+                        Op = OpDefinition->Decode(IP, OpDefinition->DecodeOptions);
                         break;
                     }
                 }
                 else
                 {
-                    Op = OpDefinition->Decode(IP);
+                    Op = OpDefinition->Decode(IP, OpDefinition->DecodeOptions);
                     break;
                 }
             }
