@@ -73,6 +73,7 @@ typedef enum
     Param_Memory,
     Param_MemoryDirectAddress,
     Param_SegmentRegister,
+    Param_DirectIntersegment,
 } param_type;
 
 typedef struct
@@ -82,6 +83,8 @@ typedef struct
     int ImmediateValue;
     int Offset; // NOTE(chuck): Displacement value or direct address.
     int ByteSizeQualifier; // NOTE(chuck): Prefixes: 0=, 1=byte, 2=word
+    int IP; // NOTE(chuck): Direct intersegment
+    int CS; // NOTE(chuck): Direct intersegment
 } op_param;
 
 #define DESTINATION 0
@@ -117,6 +120,9 @@ typedef struct
     int IsRelativeJump;
     int IsJumpTarget;
     int JumpTargetIndex; // NOTE(chuck): This is patched in on the second pass for label printing.
+
+    int UseSegmentOverride;
+    int SegmentOverride;
 } op;
 
 static u8 OpStream[1024*4] = {0};
@@ -214,6 +220,8 @@ static int OpCount = 0;
 #define OP_NAME_RET 86
 #define OP_NAME_INT 87
 #define OP_NAME_INT3 88
+#define OP_NAME_LOCK 89
+#define SEGMENT_OVERRIDE 90
 
 static char *OpNameLookup[] =
 {
@@ -306,7 +314,15 @@ static char *OpNameLookup[] =
     "ret",
     "int",
     "int3",
+    "lock",
+    "",
 };
+
+static int IsPrefix(op *Op)
+{
+    int Result = (Op->NameIndex == OP_NAME_REP) || (Op->NameIndex == OP_NAME_LOCK) || (Op->NameIndex == SEGMENT_OVERRIDE);
+    return(Result);
+}
 
 // NOTE(chuck): Annoyingly, you cannot pass a struct literal as a function argument without casting it. So use a relativelyt short name here and stuff all possible options for all functions into this.
 typedef struct
@@ -551,7 +567,7 @@ static op Xchg_RegisterOrMemoryWithRegister(u8 *IP, options DecodeOptions)
             {
                 SetParamToReg(IP, Op, DESTINATION, GetRegisterIndex(Op->RegA, Op->Word));
                 SetParamToMemDirectAddress(IP + 2, Op, SOURCE, Op->Word);
-                Op->ByteLength = Op->Word ? 4 : 3;
+                Op->ByteLength = 4;//Op->Word ? 4 : 3;
             }
             else
             {
@@ -1042,12 +1058,13 @@ static op Rep(u8 *IP, options DecodeOptions)
     return(Op);
 }
 
-static op CallDirectWithinSegment(u8 *IP, options DecodeOptions)
+static op CallDirectIntersegment(u8 *IP, options DecodeOptions)
 {
-    op Op = {OP_NAME_CALL, IP, 1, 0};
-    Op.Word = 1;
-    SetParamToMemDirectAddress(IP + 1, &Op, DESTINATION, 1);
-    Op.ByteLength = 3;
+    op Op = {DecodeOptions.NameIndex, IP, 1, 0};
+    Op.Param[DESTINATION].Type = Param_DirectIntersegment;
+    Op.Param[DESTINATION].IP = *(u16 *)&IP[1];
+    Op.Param[DESTINATION].CS = *(u16 *)&IP[3];
+    Op.ByteLength = 5;
     return(Op);
 }
 
@@ -1101,9 +1118,17 @@ static op Ret(u8 *IP, options DecodeOptions)
 
 static op Int(u8 *IP, options DecodeOptions)
 {
-    op Op = {OP_NAME_INT, IP, 0, 0};
+    op Op = {OP_NAME_INT, IP, 1, 0};
     Op.ByteLength = 2;
     SetParamToImm(IP + 1, &Op, DESTINATION, (options){0});
+    return(Op);
+}
+
+static op SegmentOverride(u8 *IP, options DecodeOptions)
+{
+    op Op = {SEGMENT_OVERRIDE, IP, 0, 0};
+    Op.SegmentOverride = (IP[0] & 0b00011000) >> 3;
+    Op.ByteLength = 1;
     return(Op);
 }
 
@@ -1207,11 +1232,16 @@ static op_definition OpTable[] =
 
     // {OP_NAME_CALL,   0b11111111, 0b11101000, 0, 0, AddSubCmp_RegisterOrMemoryWithRegisterToEither, {.NameIndex=OP_NAME_CALL, .ParamCount=1}},
     {OP_NAME_CALL,   0b11111111, 0b11111111, 1, 0b010, CallJmp_IndirectWithinSegment, {.NameIndex=OP_NAME_CALL}},
+    {OP_NAME_CALL,   0b11111111, 0b10011010, 0, 0, CallDirectIntersegment, {.NameIndex=OP_NAME_CALL}},
+
     {OP_NAME_JMP,    0b11111111, 0b11111111, 1, 0b100, CallJmp_IndirectWithinSegment, {.NameIndex=OP_NAME_JMP}},
+    {OP_NAME_JMP,    0b11111111, 0b11101010, 0, 0, CallDirectIntersegment, {.NameIndex=OP_NAME_JMP}},
+
     {OP_NAME_RET,    0b11111111, 0b11000011, 0, 0, Ret, {.ByteLength=1}},
     {OP_NAME_RET,    0b11111111, 0b11000010, 0, 0, Ret, {.ByteLength=3}},
     {OP_NAME_INT,    0b11111111, 0b11001101, 0, 0, Int, {0}},
     {OP_NAME_INT3,   0b11111111, 0b11001100, 0, 0, LiteralBytes, {.NameIndex=OP_NAME_INT3, .ByteLength=1}},
+    {OP_NAME_LOCK,   0b11111111, 0b11110000, 0, 0, LiteralBytes, {.NameIndex=OP_NAME_LOCK, .ByteLength=1}},
 
     {OP_NAME_REP,    0b11111110, 0b11110010, 0, 0, Rep, {.NameIndex=OP_NAME_REP}},
     {OP_NAME_MOVS,   0b11111110, 0b10100100, 0, 0, Rep, {.NameIndex=OP_NAME_MOVS}},
@@ -1259,6 +1289,8 @@ static op_definition OpTable[] =
     {OP_NAME_OUT,    0b11111110, 0b11100110, 0, 0, InOut_FixedPort,    {.NameIndex=OP_NAME_OUT, .SwapParams=1}},
     {OP_NAME_OUT,    0b11111110, 0b11101110, 0, 0, InOut_VariablePort, {.NameIndex=OP_NAME_OUT, .SwapParams=1}},
     {OP_NAME_XCHG,   0b11111000, 0b10010000, 0, 0, XchgAccumulator,    {.NameIndex=OP_NAME_XCHG}},
+    
+    {SEGMENT_OVERRIDE, 0b11100111, 0b00100110, 0, 0, SegmentOverride, {0}},
 };
 
 static char *EffectiveAddressLookup[8] =
@@ -1273,7 +1305,7 @@ static char *EffectiveAddressLookup[8] =
     "bx"
 };
 
-static int PrintParam(char *OutputInit, op_param *Param)
+static int PrintParam(char *OutputInit, op *Op, op_param *Param)
 {
     char *Output = OutputInit;
     int BytesWritten = 0;
@@ -1300,9 +1332,14 @@ static int PrintParam(char *OutputInit, op_param *Param)
         {
             EMIT("%s", SegmentRegisterLookup[Param->RegisterOrMemoryIndex]);
         } break;
-
+        
         case Param_Memory:
         {
+            if(Op->UseSegmentOverride)
+            {
+                EMIT("%s:", SegmentRegisterLookup[Op->SegmentOverride]);
+            }
+
             EMIT("[%s", EffectiveAddressLookup[Param->RegisterOrMemoryIndex]);
             int Offset = Param->Offset;
             if(Offset)
@@ -1323,7 +1360,17 @@ static int PrintParam(char *OutputInit, op_param *Param)
 
         case Param_MemoryDirectAddress:
         {
+            if(Op->UseSegmentOverride)
+            {
+                EMIT("%s:", SegmentRegisterLookup[Op->SegmentOverride]);
+            }
+
             EMIT("[%d]", Param->Offset);
+        } break;
+
+        case Param_DirectIntersegment:
+        {
+            EMIT("%d:%d", Param->CS, Param->IP);
         } break;
 
         default:
@@ -1484,7 +1531,7 @@ int main(int ArgCount, char **Args)
         {
             printf("\nlabel%d:\n", LabelCount++);
         }
-
+        
         if(Op->Error)
         {
             HitError = 1; // NOTE(chuck): Trip this so that all subsequent output is commented. I just want to see it continue attempting to decode the rest of the stream, even if most of it is garbage, in case it is useful for debugging.
@@ -1499,6 +1546,13 @@ int main(int ArgCount, char **Args)
             char Line[1024] = {0};
             char *LinePointer = Line;
 
+            // NOTE(chuck): Copy the segment override into the next op so that PrintParam() knows what to do.
+            if(Op->NameIndex == SEGMENT_OVERRIDE)
+            {
+                OpList[OpIndex + 1].UseSegmentOverride = 1;
+                OpList[OpIndex + 1].SegmentOverride = Op->SegmentOverride;
+            }
+
             if(Op->NameIndex >= ArrayLength(OpNameLookup))
             {
                 LinePointer += sprintf(LinePointer, "  <corrupted?> ");
@@ -1506,7 +1560,7 @@ int main(int ArgCount, char **Args)
             else
             {
                 // TODO(chuck): This is fudgeville!
-                if((OpIndex > 0) && (OpList[OpIndex - 1].NameIndex != OP_NAME_REP))
+                if(OpIndex > 0 && !IsPrefix(&OpList[OpIndex - 1]))
                 {
                     LinePointer += sprintf(LinePointer, "  ");
                 }
@@ -1523,7 +1577,10 @@ int main(int ArgCount, char **Args)
                     LinePointer += sprintf(LinePointer, "%c", Op->Word ? 'w' : 'b');
                 }
 
-                LinePointer += sprintf(LinePointer, " ");
+                if(Op->NameIndex != SEGMENT_OVERRIDE)
+                {
+                    LinePointer += sprintf(LinePointer, " ");
+                }
             }
 
             if(Op->ParamCount > 0)
@@ -1567,14 +1624,14 @@ int main(int ArgCount, char **Args)
                     {
                         LinePointer += sprintf(LinePointer, Op->Word ? "word " : "byte ");
                     }
-                    LinePointer += PrintParam(LinePointer, &Op->Param[0]);
+                    LinePointer += PrintParam(LinePointer, Op, &Op->Param[0]);
                 }
             }
 
             if(Op->ParamCount > 1)
             {
                 LinePointer += sprintf(LinePointer, ", ");
-                LinePointer += PrintParam(LinePointer, &Op->Param[1]);
+                LinePointer += PrintParam(LinePointer, Op, &Op->Param[1]);
             }
 
             if(HitError)
@@ -1582,14 +1639,14 @@ int main(int ArgCount, char **Args)
                 Line[0] = ';';
             }
 
-            if(Op->NameIndex == OP_NAME_REP)
+            if(IsPrefix(Op))
             {
                 printf("%s", Line);
             }
             else
             {
                 // TODO(chuck): This is fudgeville!
-                if((OpIndex > 0) && (OpList[OpIndex - 1].NameIndex == OP_NAME_REP))
+                if((OpIndex > 0) && IsPrefix(&OpList[OpIndex - 1]))
                 {
                     printf("%-34s", Line);
                 }
@@ -1599,7 +1656,7 @@ int main(int ArgCount, char **Args)
                 }
             }
 
-            if(Op->NameIndex != OP_NAME_REP)
+            if(!IsPrefix(Op))
             {
                 char OpBytes[1024] = {0};
                 char *OpBytesPointer = OpBytes;
@@ -1607,7 +1664,7 @@ int main(int ArgCount, char **Args)
                 int ByteLength = Op->ByteLength;
 
                 // TODO(chuck): This is fudgeville!
-                if((OpIndex > 0) && (OpList[OpIndex - 1].NameIndex == OP_NAME_REP))
+                if((OpIndex > 0) && IsPrefix(&OpList[OpIndex - 1]))
                 {
                     IP = OpList[OpIndex - 1].IP;
                     ++ByteLength;
