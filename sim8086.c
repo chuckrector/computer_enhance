@@ -1,4 +1,4 @@
-// NOTE(chuck): Homework for listing 41. Supports jump labels too. I emit byte/word prefixes too aggressively in some cases I think? But NASM doesn't care so I don't care. :^)
+// NOTE(chuck): Homework for listing 42 (challenge). Supports jump labels too. I emit byte/word prefixes too aggressively in some cases I think? But NASM doesn't care so I don't care. :^)
 
 #include <windows.h>
 #include <stdio.h>
