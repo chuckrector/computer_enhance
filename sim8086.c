@@ -120,7 +120,7 @@ typedef struct
 } op;
 
 static u8 OpStream[1024*4] = {0};
-static op OpList[1024] = {0};
+static op OpList[1024*4] = {0};
 static int OpCount = 0;
 
 #define OP_NAME_UNKNOWN 0
@@ -209,6 +209,11 @@ static int OpCount = 0;
 #define OP_NAME_SCAS 81
 #define OP_NAME_LODS 82
 #define OP_NAME_STOS 83
+#define OP_NAME_CALL 84
+#define OP_NAME_JMP 85
+#define OP_NAME_RET 86
+#define OP_NAME_INT 87
+#define OP_NAME_INT3 88
 
 static char *OpNameLookup[] =
 {
@@ -295,7 +300,12 @@ static char *OpNameLookup[] =
     "cmps",
     "scas",
     "lods",
-    "stos"
+    "stos",
+    "call",
+    "jmp",
+    "ret",
+    "int",
+    "int3",
 };
 
 // NOTE(chuck): Annoyingly, you cannot pass a struct literal as a function argument without casting it. So use a relativelyt short name here and stuff all possible options for all functions into this.
@@ -307,6 +317,7 @@ typedef struct
     int ParamCount;
     int ByteLength;
     int NoSignExtension; // TODO(chuck): Tacking this on without much thought. Confusing to have this and SignExtend. Figure out a better way to handle this.
+    int ForceSigned;
 } options;
 
 typedef struct
@@ -351,7 +362,14 @@ static void SetParamToImm(u8 *IP, op *Op, int ParamIndex, options Options)
     Op->Param[ParamIndex].Type = Param_Immediate;
     if(MaybeSignExtendAndWord)
     {
-        Op->Param[ParamIndex].ImmediateValue = *(u16 *)&IP[0];
+        if(Options.ForceSigned)
+        {
+            Op->Param[ParamIndex].ImmediateValue = *(s16 *)&IP[0];
+        }
+        else
+        {
+            Op->Param[ParamIndex].ImmediateValue = *(u16 *)&IP[0];
+        }
 
         if(Op->EmitSize)
         {
@@ -360,7 +378,15 @@ static void SetParamToImm(u8 *IP, op *Op, int ParamIndex, options Options)
     }
     else
     {
-        Op->Param[ParamIndex].ImmediateValue = IP[0];
+        if(Options.ForceSigned)
+        {
+            Op->Param[ParamIndex].ImmediateValue = (s8)IP[0];
+        }
+        else
+        {
+            Op->Param[ParamIndex].ImmediateValue = IP[0];
+        }
+
         if(Op->EmitSize)
         {
             Op->Param[ParamIndex].ByteSizeQualifier = 1; // NOTE(chuck): "byte" prefix
@@ -1016,6 +1042,71 @@ static op Rep(u8 *IP, options DecodeOptions)
     return(Op);
 }
 
+static op CallDirectWithinSegment(u8 *IP, options DecodeOptions)
+{
+    op Op = {OP_NAME_CALL, IP, 1, 0};
+    Op.Word = 1;
+    SetParamToMemDirectAddress(IP + 1, &Op, DESTINATION, 1);
+    Op.ByteLength = 3;
+    return(Op);
+}
+
+static op CallJmp_IndirectWithinSegment(u8 *IP, options DecodeOptions)
+{
+    op Opp = {DecodeOptions.NameIndex, IP, 1, 0};
+    SetOpConfig(&Opp);
+
+    op *Op = &Opp;
+    if(Op->Mode == REGISTER_MODE_NO_DISPLACEMENT) // 0b11
+    {
+        SetParamToReg(IP + 2, Op, DESTINATION, GetRegisterIndex(Op->RegB, Op->Word));
+        Op->ByteLength = 2;
+    }
+    else if(Op->Mode == MEMORY_MODE_MAYBE_NO_DISPLACEMENT)
+    {
+        if(Op->RegB != 0x06)
+        {
+            SetParamToMem(IP + 2, Op, DESTINATION, Op->RegB, 0, 0, 0);
+            Op->ByteLength = Op->Word ? 4 : 3;
+        }
+        else // NOTE(chuck): Direct address
+        {
+            SetParamToMemDirectAddress(IP + 2, Op, DESTINATION, Op->Word);
+            Op->ByteLength = Op->Word ? 4 : 3;
+        }
+    }
+    else if((Op->Mode == MEMORY_MODE_8BIT_DISPLACEMENT) ||
+            (Op->Mode == MEMORY_MODE_16BIT_DISPLACEMENT))
+    {
+        int WordDisplacement = (Op->Mode == MEMORY_MODE_16BIT_DISPLACEMENT);
+        Op->ByteLength = WordDisplacement ? 4 : 3;
+        SetParamToMem(IP + 2, Op, DESTINATION, Op->RegB, 1, WordDisplacement, 1);
+    }
+
+    return(Opp);
+}
+
+static op Ret(u8 *IP, options DecodeOptions)
+{
+    op Op = {OP_NAME_RET, IP, 0, 0};
+    Op.ByteLength = DecodeOptions.ByteLength;
+    if(Op.ByteLength == 3)
+    {
+        Op.ParamCount = 1;
+        Op.Word = 1;
+        SetParamToImm(IP + 1, &Op, DESTINATION, (options){0});
+    }
+    return(Op);
+}
+
+static op Int(u8 *IP, options DecodeOptions)
+{
+    op Op = {OP_NAME_INT, IP, 0, 0};
+    Op.ByteLength = 2;
+    SetParamToImm(IP + 1, &Op, DESTINATION, (options){0});
+    return(Op);
+}
+
 static op_definition OpTable[] =
 {
     // TODO(chuck): There is order-dependence here! AddSubCmp_ImmediateWithRegisterOrMemory will fire first if XCHG is listed after it, which is no bueno. I assume this means that I have to order all these encodings by largest prefix and descending, then misc. splotchy masks. Hopefully that works for everything? There's probably a better way to handle this then the prefix masking, such that there is no ambiguity related to ordering.
@@ -1113,7 +1204,15 @@ static op_definition OpTable[] =
     {OP_NAME_WAIT,   0b11111111, 0b10011011, 0, 0, LiteralBytes, {.NameIndex=OP_NAME_WAIT, .ByteLength=1}},
     {OP_NAME_CBW,    0b11111111, 0b10011000, 0, 0, LiteralBytes, {.NameIndex=OP_NAME_CBW, .ByteLength=1}},
     {OP_NAME_CWD,    0b11111111, 0b10011001, 0, 0, LiteralBytes, {.NameIndex=OP_NAME_CWD, .ByteLength=1}},
-    
+
+    // {OP_NAME_CALL,   0b11111111, 0b11101000, 0, 0, AddSubCmp_RegisterOrMemoryWithRegisterToEither, {.NameIndex=OP_NAME_CALL, .ParamCount=1}},
+    {OP_NAME_CALL,   0b11111111, 0b11111111, 1, 0b010, CallJmp_IndirectWithinSegment, {.NameIndex=OP_NAME_CALL}},
+    {OP_NAME_JMP,    0b11111111, 0b11111111, 1, 0b100, CallJmp_IndirectWithinSegment, {.NameIndex=OP_NAME_JMP}},
+    {OP_NAME_RET,    0b11111111, 0b11000011, 0, 0, Ret, {.ByteLength=1}},
+    {OP_NAME_RET,    0b11111111, 0b11000010, 0, 0, Ret, {.ByteLength=3}},
+    {OP_NAME_INT,    0b11111111, 0b11001101, 0, 0, Int, {0}},
+    {OP_NAME_INT3,   0b11111111, 0b11001100, 0, 0, LiteralBytes, {.NameIndex=OP_NAME_INT3, .ByteLength=1}},
+
     {OP_NAME_REP,    0b11111110, 0b11110010, 0, 0, Rep, {.NameIndex=OP_NAME_REP}},
     {OP_NAME_MOVS,   0b11111110, 0b10100100, 0, 0, Rep, {.NameIndex=OP_NAME_MOVS}},
     {OP_NAME_CMPS,   0b11111110, 0b10100110, 0, 0, Rep, {.NameIndex=OP_NAME_CMPS}},
@@ -1284,9 +1383,11 @@ int main(int ArgCount, char **Args)
     {
         op Op = {0, IP, 0};
 
+        int OpTableLength = ArrayLength(OpTable);
         int OpTableIndex;
+        int Found = 0;
         for(OpTableIndex = 0;
-            OpTableIndex < ArrayLength(OpTable);
+            OpTableIndex < OpTableLength;
             ++OpTableIndex)
         {
             op_definition *OpDefinition = OpTable + OpTableIndex;
@@ -1300,6 +1401,7 @@ int main(int ArgCount, char **Args)
                         if(OpCodeExtension == OpDefinition->Extension)
                         {
                             Op = OpDefinition->Decode(IP, OpDefinition->DecodeOptions);
+                            Found = 1;
                             break;
                         }
                     }
@@ -1308,6 +1410,7 @@ int main(int ArgCount, char **Args)
                         if(IP[1] == OpDefinition->Extension)
                         {
                             Op = OpDefinition->Decode(IP, OpDefinition->DecodeOptions);
+                            Found = 1;
                             break;
                         }
                     }
@@ -1315,11 +1418,12 @@ int main(int ArgCount, char **Args)
                 else
                 {
                     Op = OpDefinition->Decode(IP, OpDefinition->DecodeOptions);
+                    Found = 1;
                     break;
                 }
             }
         }
-        if(OpTableIndex == ArrayLength(OpTable))
+        if(!Found)
         {
             Op.Error = 1;
             Op.ByteLength = 1;
@@ -1327,6 +1431,7 @@ int main(int ArgCount, char **Args)
 
         OpList[OpCount++] = Op;
 
+        Assert(Op.ByteLength);
         IP += Op.ByteLength;
     }
 
