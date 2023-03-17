@@ -99,6 +99,7 @@ typedef struct
     {
         int Dest;
         int Sign;
+        int VariableShift;
     };
     int Word;
     int Mode;
@@ -180,6 +181,20 @@ static int OpCount = 0;
 #define OP_NAME_HLT 57
 #define OP_NAME_WAIT 58
 #define OP_NAME_IRET 59
+#define OP_NAME_DEC 60
+#define OP_NAME_NEG 61
+#define OP_NAME_MUL 62
+#define OP_NAME_IMUL 63
+#define OP_NAME_DIV 64
+#define OP_NAME_IDIV 65
+#define OP_NAME_NOT 66
+#define OP_NAME_SHL 67
+#define OP_NAME_SHR 68
+#define OP_NAME_SAR 69
+#define OP_NAME_ROL 70
+#define OP_NAME_ROR 71
+#define OP_NAME_RCL 72
+#define OP_NAME_RCR 73
 
 static char *OpNameLookup[] =
 {
@@ -243,6 +258,20 @@ static char *OpNameLookup[] =
     "hlt",
     "wait",
     "iret",
+    "dec",
+    "neg",
+    "mul",
+    "imul",
+    "div",
+    "idiv",
+    "not",
+    "shl",
+    "shr",
+    "sar",
+    "rol",
+    "ror",
+    "rcl",
+    "rcr"
 };
 
 // NOTE(chuck): Annoyingly, you cannot pass a struct literal as a function argument without casting it. So use a relativelyt short name here and stuff all possible options for all functions into this.
@@ -252,6 +281,7 @@ typedef struct
     int NameIndex;
     int SwapParams; // NOTE(chuck): in/out reuse code but "out" uses the reverse order.
     int ParamCount;
+    int ByteLength;
 } options;
 
 typedef struct
@@ -402,6 +432,7 @@ static void SharedRegisterOrMemoryVsRegister(u8 *IP, op *Op)
             else
             {
                 Op->Error = 1;
+                Op->ByteLength = 1; // NOTE(chuck): This is important for the disassembled listing of the op bytes.
             }
         }
     }
@@ -464,6 +495,7 @@ static op Xchg_RegisterOrMemoryWithRegister(u8 *IP, options DecodeOptions)
             else
             {
                 Op->Error = 1;
+                Op->ByteLength = 1;
             }
         }
     }
@@ -587,6 +619,101 @@ static op AddSubCmp_RegisterOrMemoryWithRegisterToEither(u8 *IP, options DecodeO
     return(Op);
 }
 
+static op IncDec(u8 *IP, options DecodeOptions)
+{
+    op Opp = {DecodeOptions.NameIndex, IP, 1, 0};
+
+    op *Op = &Opp;
+    Op->Word = (Op->IP[0] & 0b00000001);
+    Op->Mode = (Op->IP[1] & 0b11000000) >> 6;
+    Op->RegB = (Op->IP[1] & 0b00000111);
+
+    if(Op->Mode == REGISTER_MODE_NO_DISPLACEMENT) // 0b11
+    {
+        SetParamToReg(IP + 2, Op, DESTINATION, GetRegisterIndex(Op->RegB, Op->Word));
+        Op->ByteLength = 2;
+    }
+    else if(Op->Mode == MEMORY_MODE_MAYBE_NO_DISPLACEMENT)
+    {
+        if(Op->RegB != 0x06)
+        {
+            SetParamToMem(IP + 2, Op, DESTINATION, Op->RegB, 0, 0, 0);
+            Op->Param[DESTINATION].ByteSizeQualifier = Op->Word;
+            Op->ByteLength = 2;
+            Op->EmitSize = 1;
+        }
+        else // NOTE(chuck): Direct address
+        {
+            SetParamToMemDirectAddress(IP + 2, Op, DESTINATION, Op->Word);
+            Op->Param[DESTINATION].ByteSizeQualifier = Op->Word;
+            Op->ByteLength = Op->Word ? 4 : 3;
+            Op->EmitSize = 1;
+        }
+    }
+    else if((Op->Mode == MEMORY_MODE_8BIT_DISPLACEMENT) ||
+            (Op->Mode == MEMORY_MODE_16BIT_DISPLACEMENT))
+    {
+        int WordDisplacement = (Op->Mode == MEMORY_MODE_16BIT_DISPLACEMENT);
+        SetParamToMem(IP + 2, Op, DESTINATION, Op->RegB, 1, WordDisplacement, 1);
+        Op->Param[DESTINATION].ByteSizeQualifier = Op->Word;
+        Op->ByteLength = WordDisplacement ? 4 : 3;
+        Op->EmitSize = 1;
+    }
+
+    return(Opp);
+}
+
+static op Rotate(u8 *IP, options DecodeOptions)
+{
+    op Opp = {DecodeOptions.NameIndex, IP, 2, 0};
+    SetOpConfig(&Opp);
+
+    op *Op = &Opp;
+    if(Op->Mode == REGISTER_MODE_NO_DISPLACEMENT) // 0b11
+    {
+        SetParamToReg(IP + 2, Op, DESTINATION, GetRegisterIndex(Op->RegB, Op->Word));
+        Op->ByteLength = 2;
+    }
+    else if(Op->Mode == MEMORY_MODE_MAYBE_NO_DISPLACEMENT)
+    {
+        if(Op->RegB != 0x06)
+        {
+            SetParamToMem(IP + 2, Op, DESTINATION, Op->RegB, 0, 0, 0);
+            Op->Param[DESTINATION].ByteSizeQualifier = Op->Word;
+            Op->EmitSize = 1;
+            Op->ByteLength = 2;
+        }
+        else // NOTE(chuck): Direct address
+        {
+            SetParamToMemDirectAddress(IP + 2, Op, DESTINATION, 1);//Op->Word);
+            Op->Param[DESTINATION].ByteSizeQualifier = Op->Word;
+            Op->EmitSize = 1;
+            Op->ByteLength = 4;//Op->Word ? 4 : 3;
+        }
+    }
+    else if((Op->Mode == MEMORY_MODE_8BIT_DISPLACEMENT) ||
+            (Op->Mode == MEMORY_MODE_16BIT_DISPLACEMENT))
+    {
+        int WordDisplacement = (Op->Mode == MEMORY_MODE_16BIT_DISPLACEMENT);
+        SetParamToMem(IP + 2, Op, DESTINATION, Op->RegB, 1, WordDisplacement, 1);
+        Op->Param[DESTINATION].ByteSizeQualifier = Op->Word;
+        Op->EmitSize = 1;
+        Op->ByteLength = WordDisplacement ? 4 : 3;
+    }
+
+    if(Op->VariableShift)
+    {
+        SetParamToReg(IP, Op, SOURCE, REGISTER_NAME_CL);
+    }
+    else
+    {
+        Op->Param[SOURCE].Type = Param_Immediate;
+        Op->Param[SOURCE].ImmediateValue = 1;
+    }
+
+    return(Opp);
+}
+
 // NOTE(chuck): Copy/pasted from AddSubCmp_RegisterOrMemoryWithRegisterToEither and tweaked.
 static op Lea(u8 *IP, options DecodeOptions)
 {
@@ -629,6 +756,7 @@ static op Lea(u8 *IP, options DecodeOptions)
             // else
             // {
                 Op->Error = 1;
+                Op->ByteLength = 1;
             // }
         }
     }
@@ -816,10 +944,10 @@ static op InOut_VariablePort(u8 *IP, options DecodeOptions)
     return(Op);
 }
 
-static op OneByte(u8 *IP, options DecodeOptions)
+static op LiteralBytes(u8 *IP, options DecodeOptions)
 {
     op Op = {DecodeOptions.NameIndex, IP, 0, 0};
-    Op.ByteLength = 1;
+    Op.ByteLength = DecodeOptions.ByteLength;
     return(Op);
 }
 
@@ -880,29 +1008,56 @@ static op_definition OpTable[] =
     {OP_NAME_LOOPNZ, 0b11111111, 0b11100000, 0, 0, Loopnz, {0}},
     {OP_NAME_JCXZ,   0b11111111, 0b11100011, 0, 0, Jcxz, {0}},
     
-    {OP_NAME_XLAT,   0b11111111, 0b11010111, 0, 0, OneByte, {.NameIndex=OP_NAME_XLAT}},
+    {OP_NAME_XLAT,   0b11111111, 0b11010111, 0, 0, LiteralBytes, {.NameIndex=OP_NAME_XLAT, .ByteLength=1}},
 
-    {OP_NAME_LAHF,   0b11111111, 0b10011111, 0, 0, OneByte, {.NameIndex=OP_NAME_LAHF}},
-    {OP_NAME_SAHF,   0b11111111, 0b10011110, 0, 0, OneByte, {.NameIndex=OP_NAME_SAHF}},
-    {OP_NAME_PUSHF,  0b11111111, 0b10011100, 0, 0, OneByte, {.NameIndex=OP_NAME_PUSHF}},
-    {OP_NAME_POPF,   0b11111111, 0b10011101, 0, 0, OneByte, {.NameIndex=OP_NAME_POPF}},
-    {OP_NAME_AAA,    0b11111111, 0b00110111, 0, 0, OneByte, {.NameIndex=OP_NAME_AAA}},
-    {OP_NAME_DAA,    0b11111111, 0b00100111, 0, 0, OneByte, {.NameIndex=OP_NAME_DAA}},
+    {OP_NAME_LAHF,   0b11111111, 0b10011111, 0, 0, LiteralBytes, {.NameIndex=OP_NAME_LAHF, .ByteLength=1}},
+    {OP_NAME_SAHF,   0b11111111, 0b10011110, 0, 0, LiteralBytes, {.NameIndex=OP_NAME_SAHF, .ByteLength=1}},
+    {OP_NAME_PUSHF,  0b11111111, 0b10011100, 0, 0, LiteralBytes, {.NameIndex=OP_NAME_PUSHF, .ByteLength=1}},
+    {OP_NAME_POPF,   0b11111111, 0b10011101, 0, 0, LiteralBytes, {.NameIndex=OP_NAME_POPF, .ByteLength=1}},
+    {OP_NAME_AAA,    0b11111111, 0b00110111, 0, 0, LiteralBytes, {.NameIndex=OP_NAME_AAA, .ByteLength=1}},
+    {OP_NAME_DAA,    0b11111111, 0b00100111, 0, 0, LiteralBytes, {.NameIndex=OP_NAME_DAA, .ByteLength=1}},
+    {OP_NAME_AAS,    0b11111111, 0b00111111, 0, 0, LiteralBytes, {.NameIndex=OP_NAME_AAS, .ByteLength=1}},
+    {OP_NAME_DAS,    0b11111111, 0b00101111, 0, 0, LiteralBytes, {.NameIndex=OP_NAME_DAS, .ByteLength=1}},
 
-    {OP_NAME_INTO,   0b11111111, 0b11001110, 0, 0, OneByte, {.NameIndex=OP_NAME_INTO}},
-    {OP_NAME_IRET,   0b11111111, 0b11001111, 0, 0, OneByte, {.NameIndex=OP_NAME_IRET}},
-    {OP_NAME_CLC,    0b11111111, 0b11111000, 0, 0, OneByte, {.NameIndex=OP_NAME_CLC}},
-    {OP_NAME_CMC,    0b11111111, 0b11110101, 0, 0, OneByte, {.NameIndex=OP_NAME_CMC}},
-    {OP_NAME_STC,    0b11111111, 0b11111001, 0, 0, OneByte, {.NameIndex=OP_NAME_STC}},
-    {OP_NAME_CLD,    0b11111111, 0b11111100, 0, 0, OneByte, {.NameIndex=OP_NAME_CLD}},
-    {OP_NAME_STD,    0b11111111, 0b11111101, 0, 0, OneByte, {.NameIndex=OP_NAME_STD}},
-    {OP_NAME_CLI,    0b11111111, 0b11111010, 0, 0, OneByte, {.NameIndex=OP_NAME_CLI}},
-    {OP_NAME_STI,    0b11111111, 0b11111011, 0, 0, OneByte, {.NameIndex=OP_NAME_STI}},
-    {OP_NAME_HLT,    0b11111111, 0b11110100, 0, 0, OneByte, {.NameIndex=OP_NAME_HLT}},
-    {OP_NAME_WAIT,   0b11111111, 0b10011011, 0, 0, OneByte, {.NameIndex=OP_NAME_WAIT}},
+    {OP_NAME_INTO,   0b11111111, 0b11001110, 0, 0, LiteralBytes, {.NameIndex=OP_NAME_INTO, .ByteLength=1}},
+    {OP_NAME_IRET,   0b11111111, 0b11001111, 0, 0, LiteralBytes, {.NameIndex=OP_NAME_IRET, .ByteLength=1}},
+    {OP_NAME_CLC,    0b11111111, 0b11111000, 0, 0, LiteralBytes, {.NameIndex=OP_NAME_CLC, .ByteLength=1}},
+    {OP_NAME_CMC,    0b11111111, 0b11110101, 0, 0, LiteralBytes, {.NameIndex=OP_NAME_CMC, .ByteLength=1}},
+    {OP_NAME_STC,    0b11111111, 0b11111001, 0, 0, LiteralBytes, {.NameIndex=OP_NAME_STC, .ByteLength=1}},
+    {OP_NAME_CLD,    0b11111111, 0b11111100, 0, 0, LiteralBytes, {.NameIndex=OP_NAME_CLD, .ByteLength=1}},
+    {OP_NAME_STD,    0b11111111, 0b11111101, 0, 0, LiteralBytes, {.NameIndex=OP_NAME_STD, .ByteLength=1}},
+    {OP_NAME_CLI,    0b11111111, 0b11111010, 0, 0, LiteralBytes, {.NameIndex=OP_NAME_CLI, .ByteLength=1}},
+    {OP_NAME_STI,    0b11111111, 0b11111011, 0, 0, LiteralBytes, {.NameIndex=OP_NAME_STI, .ByteLength=1}},
+    {OP_NAME_HLT,    0b11111111, 0b11110100, 0, 0, LiteralBytes, {.NameIndex=OP_NAME_HLT, .ByteLength=1}},
+    {OP_NAME_WAIT,   0b11111111, 0b10011011, 0, 0, LiteralBytes, {.NameIndex=OP_NAME_WAIT, .ByteLength=1}},
+    {OP_NAME_CBW,    0b11111111, 0b10011000, 0, 0, LiteralBytes, {.NameIndex=OP_NAME_CBW, .ByteLength=1}},
+    {OP_NAME_CWD,    0b11111111, 0b10011001, 0, 0, LiteralBytes, {.NameIndex=OP_NAME_CWD, .ByteLength=1}},
 
-    {OP_NAME_INC,    0b11111110, 0b11111110, 1, 0b000, AddSubCmp_RegisterOrMemoryWithRegisterToEither, {.NameIndex=OP_NAME_INC, .ParamCount=1}},
+    {OP_NAME_INC,    0b11111110, 0b11111110, 1, 0b000, IncDec, {.NameIndex=OP_NAME_INC}},
     {OP_NAME_INC,    0b11111000, 0b01000000, 0, 0,     PushPop_Register,         {.NameIndex=OP_NAME_INC}},
+
+    {OP_NAME_DEC,    0b11111110, 0b11111110, 1, 0b001, IncDec, {.NameIndex=OP_NAME_DEC}},
+    {OP_NAME_DEC,    0b11111000, 0b01001000, 0, 0,     PushPop_Register,         {.NameIndex=OP_NAME_DEC}},
+
+    {OP_NAME_NEG,    0b11111110, 0b11110110, 1, 0b011, IncDec, {.NameIndex=OP_NAME_NEG}},
+
+    {OP_NAME_MUL,    0b11111110, 0b11110110, 1, 0b100, IncDec, {.NameIndex=OP_NAME_MUL}},
+    {OP_NAME_IMUL,   0b11111110, 0b11110110, 1, 0b101, IncDec, {.NameIndex=OP_NAME_IMUL}},
+    {OP_NAME_DIV,    0b11111110, 0b11110110, 1, 0b110, IncDec, {.NameIndex=OP_NAME_DIV}},
+    {OP_NAME_IDIV,   0b11111110, 0b11110110, 1, 0b111, IncDec, {.NameIndex=OP_NAME_IDIV}},
+
+    {OP_NAME_NOT,    0b11111110, 0b11110110, 1, 0b010, IncDec, {.NameIndex=OP_NAME_NOT}},
+
+    {OP_NAME_SHL,    0b11111100, 0b11010000, 1, 0b100, Rotate, {.NameIndex=OP_NAME_SHL}},
+    {OP_NAME_SHR,    0b11111100, 0b11010000, 1, 0b101, Rotate, {.NameIndex=OP_NAME_SHR}},
+    {OP_NAME_SAR,    0b11111100, 0b11010000, 1, 0b111, Rotate, {.NameIndex=OP_NAME_SAR}},
+    {OP_NAME_ROL,    0b11111100, 0b11010000, 1, 0b000, Rotate, {.NameIndex=OP_NAME_ROL}},
+    {OP_NAME_ROR,    0b11111100, 0b11010000, 1, 0b001, Rotate, {.NameIndex=OP_NAME_ROR}},
+    {OP_NAME_RCL,    0b11111100, 0b11010000, 1, 0b010, Rotate, {.NameIndex=OP_NAME_RCL}},
+    {OP_NAME_RCR,    0b11111100, 0b11010000, 1, 0b011, Rotate, {.NameIndex=OP_NAME_RCR}},
+
+    {OP_NAME_AAM,    0b11111111, 0b11010100, 2, 0b00001010, LiteralBytes, {.NameIndex=OP_NAME_AAM, .ByteLength=2}},
+    {OP_NAME_AAD,    0b11111111, 0b11010101, 2, 0b00001010, LiteralBytes, {.NameIndex=OP_NAME_AAD, .ByteLength=2}},
 
     {OP_NAME_PUSH,   0b11111111, 0b11111111, 1, 0b110, PushPop_RegisterOrMemory, {.NameIndex=OP_NAME_PUSH}},
     {OP_NAME_PUSH,   0b11111000, 0b01010000, 0, 0,     PushPop_Register,         {.NameIndex=OP_NAME_PUSH}},
@@ -986,12 +1141,11 @@ static int PrintParam(char *OutputInit, op_param *Param)
 
         default:
         {
-            printf("Unknown parameter type: %d\n", Param->Type);
+            EMIT("<unknown parameter type: %d>", Param->Type);
             if(Output != OutputInit)
             {
-                printf("Partial output: %s\n", OutputInit);
+                EMIT(" <partial output: %s>", OutputInit);
             }
-            ExitProcess(1);
         } break;
     }
 
@@ -1048,15 +1202,26 @@ int main(int ArgCount, char **Args)
             ++OpTableIndex)
         {
             op_definition *OpDefinition = OpTable + OpTableIndex;
-            if((*IP & OpDefinition->PrefixMask) == OpDefinition->Prefix)
+            if((IP[0] & OpDefinition->PrefixMask) == OpDefinition->Prefix)
             {
                 if(OpDefinition->UseExtension)
                 {
-                    int OpCodeExtension = ((IP[1] & 0b00111000) >> 3);
-                    if(OpCodeExtension == OpDefinition->Extension)
+                    if(OpDefinition->UseExtension == 1)
                     {
-                        Op = OpDefinition->Decode(IP, OpDefinition->DecodeOptions);
-                        break;
+                        int OpCodeExtension = ((IP[1] & 0b00111000) >> 3);
+                        if(OpCodeExtension == OpDefinition->Extension)
+                        {
+                            Op = OpDefinition->Decode(IP, OpDefinition->DecodeOptions);
+                            break;
+                        }
+                    }
+                    else if(OpDefinition->UseExtension == 2)
+                    {
+                        if(IP[1] == OpDefinition->Extension)
+                        {
+                            Op = OpDefinition->Decode(IP, OpDefinition->DecodeOptions);
+                            break;
+                        }
                     }
                 }
                 else
@@ -1069,11 +1234,12 @@ int main(int ArgCount, char **Args)
         if(OpTableIndex == ArrayLength(OpTable))
         {
             Op.Error = 1;
+            Op.ByteLength = 1;
         }
 
         OpList[OpCount++] = Op;
 
-        IP += Op.Error ? 1 : Op.ByteLength;
+        IP += Op.ByteLength;
     }
 
     // TODO(chuck): Rethink the jump targetting. This seems too complicated?
@@ -1132,7 +1298,7 @@ int main(int ArgCount, char **Args)
 
             char OpBytes[32] = {0};
             sprintf(OpBytes, "%02X", Op->IP[0]);
-            printf("%-40s  0x%08llX: %-18s\n", "; ???", (Op->IP - OpStream), OpBytes);
+            printf("%-40s  0x%08llX: %s\n", "; ???", (Op->IP - OpStream), OpBytes);
             Result = 1;
         }
         else
@@ -1212,13 +1378,13 @@ int main(int ArgCount, char **Args)
                 OpByteIndex < Op->ByteLength;
                 ++OpByteIndex)
             {
-                int BytesWritten = sprintf(OpBytesPointer, "%02X ", Op->IP[OpByteIndex]);
+                int BytesWritten = sprintf(OpBytesPointer, " %02X", Op->IP[OpByteIndex]);
                 OpBytesPointer += BytesWritten;
                 __int64 EmitLength = (OpBytesPointer - OpBytes);
                 int OpBytesLength = ArrayLength(OpBytes);
                 Assert(EmitLength < OpBytesLength);
             }
-            printf("; 0x%08llX: %-32s\n", (Op->IP - OpStream), OpBytes);
+            printf("; 0x%08llX:%s\n", (Op->IP - OpStream), OpBytes);
         }
     }
 
