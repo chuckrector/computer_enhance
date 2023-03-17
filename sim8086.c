@@ -101,7 +101,11 @@ typedef struct
         int Sign;
         int VariableShift;
     };
-    int Word;
+    union
+    {
+        int Word;
+        int RepeatWhileZero;
+    };
     int Mode;
     union
     {
@@ -199,6 +203,12 @@ static int OpCount = 0;
 #define OP_NAME_TEST 75
 #define OP_NAME_OR 76
 #define OP_NAME_XOR 77
+#define OP_NAME_REP 78
+#define OP_NAME_MOVS 79
+#define OP_NAME_CMPS 80
+#define OP_NAME_SCAS 81
+#define OP_NAME_LODS 82
+#define OP_NAME_STOS 83
 
 static char *OpNameLookup[] =
 {
@@ -280,6 +290,12 @@ static char *OpNameLookup[] =
     "test",
     "or",
     "xor",
+    "rep",
+    "movs",
+    "cmps",
+    "scas",
+    "lods",
+    "stos"
 };
 
 // NOTE(chuck): Annoyingly, you cannot pass a struct literal as a function argument without casting it. So use a relativelyt short name here and stuff all possible options for all functions into this.
@@ -992,6 +1008,14 @@ static op LiteralBytes(u8 *IP, options DecodeOptions)
     return(Op);
 }
 
+static op Rep(u8 *IP, options DecodeOptions)
+{
+    op Op = {DecodeOptions.NameIndex, IP, 0, 0};
+    Op.RepeatWhileZero = (IP[0] & 1);
+    Op.ByteLength = 1;
+    return(Op);
+}
+
 static op_definition OpTable[] =
 {
     // TODO(chuck): There is order-dependence here! AddSubCmp_ImmediateWithRegisterOrMemory will fire first if XCHG is listed after it, which is no bueno. I assume this means that I have to order all these encodings by largest prefix and descending, then misc. splotchy masks. Hopefully that works for everything? There's probably a better way to handle this then the prefix masking, such that there is no ambiguity related to ordering.
@@ -1089,6 +1113,13 @@ static op_definition OpTable[] =
     {OP_NAME_WAIT,   0b11111111, 0b10011011, 0, 0, LiteralBytes, {.NameIndex=OP_NAME_WAIT, .ByteLength=1}},
     {OP_NAME_CBW,    0b11111111, 0b10011000, 0, 0, LiteralBytes, {.NameIndex=OP_NAME_CBW, .ByteLength=1}},
     {OP_NAME_CWD,    0b11111111, 0b10011001, 0, 0, LiteralBytes, {.NameIndex=OP_NAME_CWD, .ByteLength=1}},
+    
+    {OP_NAME_REP,    0b11111110, 0b11110010, 0, 0, Rep, {.NameIndex=OP_NAME_REP}},
+    {OP_NAME_MOVS,   0b11111110, 0b10100100, 0, 0, Rep, {.NameIndex=OP_NAME_MOVS}},
+    {OP_NAME_CMPS,   0b11111110, 0b10100110, 0, 0, Rep, {.NameIndex=OP_NAME_CMPS}},
+    {OP_NAME_SCAS,   0b11111110, 0b10101110, 0, 0, Rep, {.NameIndex=OP_NAME_SCAS}},
+    {OP_NAME_LODS,   0b11111110, 0b10101100, 0, 0, Rep, {.NameIndex=OP_NAME_LODS}},
+    {OP_NAME_STOS,   0b11111110, 0b10101010, 0, 0, Rep, {.NameIndex=OP_NAME_STOS}},
 
     {OP_NAME_INC,    0b11111110, 0b11111110, 1, 0b000, IncDec, {.NameIndex=OP_NAME_INC}},
     {OP_NAME_INC,    0b11111000, 0b01000000, 0, 0,     PushPop_Register,         {.NameIndex=OP_NAME_INC}},
@@ -1369,7 +1400,25 @@ int main(int ArgCount, char **Args)
             }
             else
             {
-                LinePointer += sprintf(LinePointer, "  %s ", OpNameLookup[Op->NameIndex]);
+                // TODO(chuck): This is fudgeville!
+                if((OpIndex > 0) && (OpList[OpIndex - 1].NameIndex != OP_NAME_REP))
+                {
+                    LinePointer += sprintf(LinePointer, "  ");
+                }
+
+                LinePointer += sprintf(LinePointer, "%s", OpNameLookup[Op->NameIndex]);
+
+                // TODO(chuck): This is fudgeville!
+                if((Op->NameIndex == OP_NAME_MOVS) ||
+                   (Op->NameIndex == OP_NAME_CMPS) ||
+                   (Op->NameIndex == OP_NAME_SCAS) ||
+                   (Op->NameIndex == OP_NAME_LODS) ||
+                   (Op->NameIndex == OP_NAME_STOS))
+                {
+                    LinePointer += sprintf(LinePointer, "%c", Op->Word ? 'w' : 'b');
+                }
+
+                LinePointer += sprintf(LinePointer, " ");
             }
 
             if(Op->ParamCount > 0)
@@ -1427,21 +1476,50 @@ int main(int ArgCount, char **Args)
             {
                 Line[0] = ';';
             }
-            printf("%-40s", Line);
 
-            char OpBytes[1024] = {0};
-            char *OpBytesPointer = OpBytes;
-            for(int OpByteIndex = 0;
-                OpByteIndex < Op->ByteLength;
-                ++OpByteIndex)
+            if(Op->NameIndex == OP_NAME_REP)
             {
-                int BytesWritten = sprintf(OpBytesPointer, " %02X", Op->IP[OpByteIndex]);
-                OpBytesPointer += BytesWritten;
-                __int64 EmitLength = (OpBytesPointer - OpBytes);
-                int OpBytesLength = ArrayLength(OpBytes);
-                Assert(EmitLength < OpBytesLength);
+                printf("%s", Line);
             }
-            printf("; 0x%08llX:%s\n", (Op->IP - OpStream), OpBytes);
+            else
+            {
+                // TODO(chuck): This is fudgeville!
+                if((OpIndex > 0) && (OpList[OpIndex - 1].NameIndex == OP_NAME_REP))
+                {
+                    printf("%-34s", Line);
+                }
+                else
+                {
+                    printf("%-40s", Line);
+                }
+            }
+
+            if(Op->NameIndex != OP_NAME_REP)
+            {
+                char OpBytes[1024] = {0};
+                char *OpBytesPointer = OpBytes;
+                unsigned char *IP = Op->IP;
+                int ByteLength = Op->ByteLength;
+
+                // TODO(chuck): This is fudgeville!
+                if((OpIndex > 0) && (OpList[OpIndex - 1].NameIndex == OP_NAME_REP))
+                {
+                    IP = OpList[OpIndex - 1].IP;
+                    ++ByteLength;
+                }
+
+                for(int OpByteIndex = 0;
+                    OpByteIndex < ByteLength;
+                    ++OpByteIndex)
+                {
+                    int BytesWritten = sprintf(OpBytesPointer, " %02X", IP[OpByteIndex]);
+                    OpBytesPointer += BytesWritten;
+                    __int64 EmitLength = (OpBytesPointer - OpBytes);
+                    int OpBytesLength = ArrayLength(OpBytes);
+                    Assert(EmitLength < OpBytesLength);
+                }
+                printf("; 0x%08llX:%s\n", (IP - OpStream), OpBytes);
+            }
         }
     }
 
