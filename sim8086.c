@@ -179,7 +179,7 @@ static int OpCount = 0;
 #define OP_NAME_STI 56
 #define OP_NAME_HLT 57
 #define OP_NAME_WAIT 58
-#define OP_NAME_IRET 549
+#define OP_NAME_IRET 59
 
 static char *OpNameLookup[] =
 {
@@ -242,6 +242,7 @@ static char *OpNameLookup[] =
     "sti",
     "hlt",
     "wait",
+    "iret",
 };
 
 // NOTE(chuck): Annoyingly, you cannot pass a struct literal as a function argument without casting it. So use a relativelyt short name here and stuff all possible options for all functions into this.
@@ -1139,7 +1140,14 @@ int main(int ArgCount, char **Args)
             char Line[1024] = {0};
             char *LinePointer = Line;
 
-            LinePointer += sprintf(LinePointer, "  %s ", OpNameLookup[Op->NameIndex]);
+            if(Op->NameIndex >= ArrayLength(OpNameLookup))
+            {
+                LinePointer += sprintf(LinePointer, "  <corrupted?> ");
+            }
+            else
+            {
+                LinePointer += sprintf(LinePointer, "  %s ", OpNameLookup[Op->NameIndex]);
+            }
 
             if(Op->ParamCount > 0)
             {
