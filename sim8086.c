@@ -114,6 +114,10 @@ typedef struct
     int JumpTargetIndex; // NOTE(chuck): This is patched in on the second pass for label printing.
 } op;
 
+static u8 OpStream[1024*4] = {0};
+static op OpList[1024] = {0};
+static int OpCount = 0;
+
 #define OP_NAME_UNKNOWN 0
 #define OP_NAME_MOV 1
 #define OP_NAME_ADD 2
@@ -144,6 +148,38 @@ typedef struct
 #define OP_NAME_PUSH 25
 #define OP_NAME_POP 26
 #define OP_NAME_XCHG 27
+#define OP_NAME_IN 28
+#define OP_NAME_OUT 29
+#define OP_NAME_XLAT 30
+#define OP_NAME_LEA 31
+#define OP_NAME_LDS 32
+#define OP_NAME_LES 33
+#define OP_NAME_LAHF 34
+#define OP_NAME_SAHF 35
+#define OP_NAME_PUSHF 36
+#define OP_NAME_POPF 37
+#define OP_NAME_ADC 38
+#define OP_NAME_INC 39
+#define OP_NAME_AAA 40
+#define OP_NAME_DAA 41
+#define OP_NAME_SBB 42
+#define OP_NAME_AAS 43
+#define OP_NAME_DAS 44
+#define OP_NAME_AAM 45
+#define OP_NAME_AAD 46
+#define OP_NAME_CBW 47
+#define OP_NAME_CWD 48
+#define OP_NAME_INTO 49
+#define OP_NAME_CLC 50
+#define OP_NAME_CMC 51
+#define OP_NAME_STC 52
+#define OP_NAME_CLD 53
+#define OP_NAME_STD 54
+#define OP_NAME_CLI 55
+#define OP_NAME_STI 56
+#define OP_NAME_HLT 57
+#define OP_NAME_WAIT 58
+#define OP_NAME_IRET 549
 
 static char *OpNameLookup[] =
 {
@@ -175,6 +211,37 @@ static char *OpNameLookup[] =
     "push",
     "pop",
     "xchg",
+    "in",
+    "out",
+    "xlat",
+    "lea",
+    "lds",
+    "les",
+    "lahf",
+    "sahf",
+    "pushf",
+    "popf",
+    "adc",
+    "inc",
+    "aaa",
+    "daa",
+    "sbb",
+    "aas",
+    "das",
+    "aam",
+    "aad",
+    "cbw",
+    "cwd",
+    "into",
+    "clc",
+    "cmc",
+    "stc",
+    "cld",
+    "std",
+    "cli",
+    "sti",
+    "hlt",
+    "wait",
 };
 
 // NOTE(chuck): Annoyingly, you cannot pass a struct literal as a function argument without casting it. So use a relativelyt short name here and stuff all possible options for all functions into this.
@@ -182,6 +249,8 @@ typedef struct
 {
     int SignExtend;
     int NameIndex;
+    int SwapParams; // NOTE(chuck): in/out reuse code but "out" uses the reverse order.
+    int ParamCount;
 } options;
 
 typedef struct
@@ -217,17 +286,6 @@ static void SetParamToImm(u8 *IP, op *Op, int ParamIndex, options Options)
     if((Options.SignExtend == 0) && Op->Word)
     {
         Op->Param[ParamIndex].ImmediateValue = *(u16 *)&IP[0];
-        if(Options.SignExtend)
-        {
-            if(Op->Param[ParamIndex].ImmediateValue & 0x80)
-            {
-                Op->Param[ParamIndex].ImmediateValue |= 0xff00;
-            }
-            else
-            {
-                Op->Param[ParamIndex].ImmediateValue &= ~0xff00;
-            }
-        }
 
         if(Op->EmitSize)
         {
@@ -236,10 +294,22 @@ static void SetParamToImm(u8 *IP, op *Op, int ParamIndex, options Options)
     }
     else
     {
-        Op->Param[ParamIndex].ImmediateValue = (s8)IP[0];
+        Op->Param[ParamIndex].ImmediateValue = IP[0];
         if(Op->EmitSize)
         {
             Op->Param[ParamIndex].ByteSizeQualifier = 1; // NOTE(chuck): "byte" prefix
+        }
+    }
+
+    if(Options.SignExtend)
+    {
+        if(Op->Param[ParamIndex].ImmediateValue & 0x80)
+        {
+            Op->Param[ParamIndex].ImmediateValue |= 0xffffff00;
+        }
+        else
+        {
+            Op->Param[ParamIndex].ImmediateValue &= ~0xffffff00;
         }
     }
 }
@@ -297,7 +367,7 @@ static void SetParamToMemDirectAddress(u8 *IP, op *Op, int ParamIndex, int Word)
 
 static void SharedRegisterOrMemoryVsRegister(u8 *IP, op *Op)
 {
-    if(Op->Mode == REGISTER_MODE_NO_DISPLACEMENT)
+    if(Op->Mode == REGISTER_MODE_NO_DISPLACEMENT) // 0b11
     {
         SetParamToReg(IP + 2, Op, DESTINATION, GetRegisterIndex(Op->RegB, Op->Word));
         SetParamToReg(IP + 2, Op, SOURCE, GetRegisterIndex(Op->RegA, Op->Word));
@@ -352,6 +422,70 @@ static void SharedRegisterOrMemoryVsRegister(u8 *IP, op *Op)
     }
 }
 
+static op Xchg_RegisterOrMemoryWithRegister(u8 *IP, options DecodeOptions)
+{
+    op Opp = {DecodeOptions.NameIndex, IP, 2, 0};
+    SetOpConfig(&Opp);
+
+    op *Op = &Opp;
+    if(Op->Mode == REGISTER_MODE_NO_DISPLACEMENT)
+    {
+        // NOTE(chuck): XCHG-specific
+        SetParamToReg(IP + 2, Op, DESTINATION, GetRegisterIndex(Op->RegA, Op->Word));
+        SetParamToReg(IP + 2, Op, SOURCE, GetRegisterIndex(Op->RegB, Op->Word));
+        Op->ByteLength = 2;
+    }
+    else if(Op->Mode == MEMORY_MODE_MAYBE_NO_DISPLACEMENT)
+    {
+        if(Op->RegB != 0x06)
+        {
+            if(Op->Dest)
+            {
+                SetParamToReg(IP + 2, Op, DESTINATION, GetRegisterIndex(Op->RegA, Op->Word));
+                SetParamToMem(IP + 2, Op, SOURCE, Op->RegB, 0, 0, 0);
+            }
+            else
+            {
+                SetParamToMem(IP + 2, Op, DESTINATION, Op->RegB, 0, 0, 0);
+                SetParamToReg(IP + 2, Op, SOURCE, GetRegisterIndex(Op->RegA, Op->Word));
+            }
+
+            Op->ByteLength = 2;
+        }
+        else // NOTE(chuck): Direct address
+        {
+            if(Op->Dest)
+            {
+                SetParamToReg(IP, Op, DESTINATION, GetRegisterIndex(Op->RegA, Op->Word));
+                SetParamToMemDirectAddress(IP + 2, Op, SOURCE, Op->Word);
+                Op->ByteLength = Op->Word ? 4 : 3;
+            }
+            else
+            {
+                Op->Error = 1;
+            }
+        }
+    }
+    else if((Op->Mode == MEMORY_MODE_8BIT_DISPLACEMENT) ||
+            (Op->Mode == MEMORY_MODE_16BIT_DISPLACEMENT))
+    {
+        int WordDisplacement = (Op->Mode == MEMORY_MODE_16BIT_DISPLACEMENT);
+        Op->ByteLength = WordDisplacement ? 4 : 3;
+        if(Op->Dest)
+        {
+            SetParamToReg(IP + 2, Op, DESTINATION, GetRegisterIndex(Op->RegA, Op->Word));
+            SetParamToMem(IP + 2, Op, SOURCE, Op->RegB, 1, WordDisplacement, 1);
+        }
+        else
+        {
+            SetParamToMem(IP + 2, Op, DESTINATION, Op->RegB, 1, WordDisplacement, 1);
+            SetParamToReg(IP + 2, Op, SOURCE, GetRegisterIndex(Op->RegA, Op->Word));
+        }
+    }
+
+    return(Opp);
+}
+
 // ::: 1 0 0 0 1 0 d w | mod  reg   r/m  |    (DISP-LO)    |    (DISP-HI)    |
 static op MovRegisterOrMemoryToOrFromRegister(u8 *IP, options DecodeOptions)
 {
@@ -385,7 +519,7 @@ static void SharedImmediateToRegisterOrMemory(u8 *IP, op *Op, options Options)
     {
         SetParamToReg(IP + 2, Op, DESTINATION, GetRegisterIndex(Op->RegB, Op->Word));
         SetParamToImm(IP + 2, Op, SOURCE, Options);
-        Op->ByteLength = Op->Word ? 3 : 2;
+        Op->ByteLength = ((Options.SignExtend == 0) && Op->Word) ? 4 : 3;
     }
     else if(Op->Mode == MEMORY_MODE_MAYBE_NO_DISPLACEMENT)
     {
@@ -446,10 +580,76 @@ static op MovAccumulatorToMemory(u8 *IP, options DecodeOptions)
 // ::: 0 0 0 0 0 0 d w | mod  reg   r/m  |    (DISP-LO)    |    (DISP-HI)    |
 static op AddSubCmp_RegisterOrMemoryWithRegisterToEither(u8 *IP, options DecodeOptions)
 {
-    op Op = {DecodeOptions.NameIndex, IP, 2, 0};
+    op Op = {DecodeOptions.NameIndex, IP, DecodeOptions.ParamCount, 0};
     SetOpConfig(&Op);
     SharedRegisterOrMemoryVsRegister(IP, &Op);
     return(Op);
+}
+
+// NOTE(chuck): Copy/pasted from AddSubCmp_RegisterOrMemoryWithRegisterToEither and tweaked.
+static op Lea(u8 *IP, options DecodeOptions)
+{
+    op Opp = {DecodeOptions.NameIndex, IP, 2, 0};
+    SetOpConfig(&Opp);
+    Opp.Word = 1; // NOTE(chuck): LEA-specific
+
+    op *Op = &Opp;
+    if(Op->Mode == REGISTER_MODE_NO_DISPLACEMENT)
+    {
+        SetParamToReg(IP + 2, Op, DESTINATION, GetRegisterIndex(Op->RegB, Op->Word));
+        SetParamToReg(IP + 2, Op, SOURCE, GetRegisterIndex(Op->RegA, Op->Word));
+        Op->ByteLength = 2; // TODO(chuck): Maybe just increment pointers like any standard file format parser does instead. Not sure why I did this everywhere.
+    }
+    else if(Op->Mode == MEMORY_MODE_MAYBE_NO_DISPLACEMENT)
+    {
+        if(Op->RegB != 0x06)
+        {
+            // if(Op->Dest)
+            // {
+            //     SetParamToReg(IP + 2, Op, DESTINATION, GetRegisterIndex(Op->RegA, Op->Word));
+            //     SetParamToMem(IP + 2, Op, SOURCE, Op->RegB, 0, 0, 0);
+            // }
+            // else
+            // {
+                SetParamToMem(IP + 2, Op, DESTINATION, Op->RegB, 0, 0, 0);
+                SetParamToReg(IP + 2, Op, SOURCE, GetRegisterIndex(Op->RegA, Op->Word));
+            // }
+
+            Op->ByteLength = 2;
+        }
+        else // NOTE(chuck): Direct address
+        {
+            // if(Op->Dest)
+            // {
+            //     SetParamToReg(IP, Op, DESTINATION, GetRegisterIndex(Op->RegA, Op->Word));
+            //     SetParamToMemDirectAddress(IP + 2, Op, SOURCE, Op->Word);
+            //     Op->ByteLength = Op->Word ? 4 : 3;
+            // }
+            // else
+            // {
+                Op->Error = 1;
+            // }
+        }
+    }
+    else if((Op->Mode == MEMORY_MODE_8BIT_DISPLACEMENT) ||
+            (Op->Mode == MEMORY_MODE_16BIT_DISPLACEMENT))
+    {
+        int WordDisplacement = (Op->Mode == MEMORY_MODE_16BIT_DISPLACEMENT);
+        Op->ByteLength = WordDisplacement ? 4 : 3;
+        // if(Op->Dest)
+        // {
+        //     SetParamToReg(IP + 2, Op, DESTINATION, GetRegisterIndex(Op->RegA, Op->Word));
+        //     SetParamToMem(IP + 2, Op, SOURCE, Op->RegB, 1, WordDisplacement, 1);
+        // }
+        // else
+        // {
+            // NOTE(chuck): LEA uses reverse ordering from ADD/SUB/BMP
+            SetParamToReg(IP + 2, Op, DESTINATION, GetRegisterIndex(Op->RegA, Op->Word));
+            SetParamToMem(IP + 2, Op, SOURCE, Op->RegB, 1, WordDisplacement, 1);
+        // }
+    }
+
+    return(Opp);
 }
 
 // ::: 1 0 0 0 0 0 s w | mod 0 0 0  r/m  | (DISP-LO) | (DISP-HI) | data | data if w=1 |
@@ -457,7 +657,7 @@ static op AddSubCmp_ImmediateWithRegisterOrMemory(u8 *IP, options DecodeOptions)
 {
     op Op = {DecodeOptions.NameIndex, IP, 2, 0};
     SetOpConfig(&Op);
-    SharedImmediateToRegisterOrMemory(IP, &Op, (options){.SignExtend = 1});
+    SharedImmediateToRegisterOrMemory(IP, &Op, (options){.SignExtend = Op.Sign});
     return(Op);
 }
 
@@ -559,11 +759,74 @@ static op PushPop_SegmentRegister(u8 *IP, options DecodeOptions)
     return(Op);
 }
 
+static op XchgAccumulator(u8 *IP, options DecodeOptions)
+{
+    op Op = {OP_NAME_XCHG, IP, 2, 0};
+    int Register = (IP[0] & 0b00000111);
+    Op.Param[DESTINATION].Type = Param_Register;
+    Op.Param[DESTINATION].RegisterOrMemoryIndex = REGISTER_NAME_AX;
+    SetParamToReg(IP, &Op, SOURCE, GetRegisterIndex(Register, 1));
+    Op.ByteLength = 1;
+    return(Op);
+}
+
+static op InOut_FixedPort(u8 *IP, options DecodeOptions)
+{
+    op Op = {DecodeOptions.NameIndex, IP, 2, 0};
+    int Word = (IP[0] & 0b00000001);
+
+    // NOTE(chuck): For "out"
+    int A = DESTINATION;
+    int B = SOURCE;
+    if(DecodeOptions.SwapParams)
+    {
+        int Temp = A;
+        A = B;
+        B = Temp;
+    }
+
+    Op.Param[A].Type = Param_Register;
+    Op.Param[A].RegisterOrMemoryIndex = Word ? REGISTER_NAME_AX : REGISTER_NAME_AL;
+    SetParamToImm(IP + 1, &Op, B, (options){0});
+    Op.ByteLength = 2;
+    return(Op);
+}
+
+static op InOut_VariablePort(u8 *IP, options DecodeOptions)
+{
+    op Op = {DecodeOptions.NameIndex, IP, 2, 0};
+    int Word = (IP[0] & 0b00000001);
+
+    // NOTE(chuck): For "out"
+    int A = DESTINATION;
+    int B = SOURCE;
+    if(DecodeOptions.SwapParams)
+    {
+        int Temp = A;
+        A = B;
+        B = Temp;
+    }
+
+    Op.Param[A].Type = Param_Register;
+    Op.Param[A].RegisterOrMemoryIndex = Word ? REGISTER_NAME_AX : REGISTER_NAME_AL;
+    Op.Param[B].Type = Param_Register;
+    Op.Param[B].RegisterOrMemoryIndex = REGISTER_NAME_DX;
+    Op.ByteLength = 1;
+    return(Op);
+}
+
+static op OneByte(u8 *IP, options DecodeOptions)
+{
+    op Op = {DecodeOptions.NameIndex, IP, 0, 0};
+    Op.ByteLength = 1;
+    return(Op);
+}
+
 static op_definition OpTable[] =
 {
     // TODO(chuck): There is order-dependence here! AddSubCmp_ImmediateWithRegisterOrMemory will fire first if XCHG is listed after it, which is no bueno. I assume this means that I have to order all these encodings by largest prefix and descending, then misc. splotchy masks. Hopefully that works for everything? There's probably a better way to handle this then the prefix masking, such that there is no ambiguity related to ordering.
     // TODO(chuck): Table 4-14. Machine Instruction Encoding Matrix looks interesting but I don't understand how to read it.
-    {OP_NAME_XCHG,   0b11111110, 0b10000110, 0, 0, AddSubCmp_RegisterOrMemoryWithRegisterToEither, {.NameIndex=OP_NAME_XCHG}},
+    {OP_NAME_XCHG,   0b11111110, 0b10000110, 0, 0, Xchg_RegisterOrMemoryWithRegister, {.NameIndex=OP_NAME_XCHG}},
 
     {OP_NAME_MOV,    0b11111100, 0b10001000, 0, 0, MovRegisterOrMemoryToOrFromRegister, {0}},
     {OP_NAME_MOV,    0b11110000, 0b10110000, 0, 0, MovImmediateToRegister, {0}},
@@ -571,17 +834,29 @@ static op_definition OpTable[] =
     {OP_NAME_MOV,    0b11111110, 0b10100000, 0, 0, MovMemoryToAccumulator, {0}},
     {OP_NAME_MOV,    0b11111110, 0b10100010, 0, 0, MovAccumulatorToMemory, {0}},
 
-    {OP_NAME_ADD,    0b11111100, 0b00000000, 0, 0,     AddSubCmp_RegisterOrMemoryWithRegisterToEither, {.NameIndex=OP_NAME_ADD}},
+    {OP_NAME_ADD,    0b11111100, 0b00000000, 0, 0,     AddSubCmp_RegisterOrMemoryWithRegisterToEither, {.NameIndex=OP_NAME_ADD, .ParamCount=2}},
     {OP_NAME_ADD,    0b11111000, 0b10000000, 1, 0b000, AddSubCmp_ImmediateWithRegisterOrMemory,        {.NameIndex=OP_NAME_ADD}},
     {OP_NAME_ADD,    0b11111110, 0b00000100, 0, 0,     AddSubCmp_ImmediateWithAccumulator,             {.NameIndex=OP_NAME_ADD}},
 
-    {OP_NAME_SUB,    0b11111100, 0b00101000, 0, 0,     AddSubCmp_RegisterOrMemoryWithRegisterToEither, {.NameIndex=OP_NAME_SUB}},
+    {OP_NAME_ADC,    0b11111100, 0b00010000, 0, 0,     AddSubCmp_RegisterOrMemoryWithRegisterToEither, {.NameIndex=OP_NAME_ADC, .ParamCount=2}},
+    {OP_NAME_ADC,    0b11111000, 0b10000000, 1, 0b010, AddSubCmp_ImmediateWithRegisterOrMemory,        {.NameIndex=OP_NAME_ADC}},
+    {OP_NAME_ADC,    0b11111110, 0b00010100, 0, 0,     AddSubCmp_ImmediateWithAccumulator,             {.NameIndex=OP_NAME_ADC}},
+
+    {OP_NAME_SUB,    0b11111100, 0b00101000, 0, 0,     AddSubCmp_RegisterOrMemoryWithRegisterToEither, {.NameIndex=OP_NAME_SUB, .ParamCount=2}},
     {OP_NAME_SUB,    0b11111000, 0b10000000, 1, 0b101, AddSubCmp_ImmediateWithRegisterOrMemory,        {.NameIndex=OP_NAME_SUB}},
     {OP_NAME_SUB,    0b11111110, 0b00101100, 0, 0,     AddSubCmp_ImmediateWithAccumulator,             {.NameIndex=OP_NAME_SUB}},
 
-    {OP_NAME_CMP,    0b11111100, 0b00111000, 0, 0,     AddSubCmp_RegisterOrMemoryWithRegisterToEither, {.NameIndex=OP_NAME_CMP}},
+    {OP_NAME_SBB,    0b11111100, 0b00011000, 0, 0,     AddSubCmp_RegisterOrMemoryWithRegisterToEither, {.NameIndex=OP_NAME_SBB, .ParamCount=2}},
+    {OP_NAME_SBB,    0b11111000, 0b10000000, 1, 0b011, AddSubCmp_ImmediateWithRegisterOrMemory,        {.NameIndex=OP_NAME_SBB}},
+    {OP_NAME_SBB,    0b11111110, 0b00011100, 0, 0,     AddSubCmp_ImmediateWithAccumulator,             {.NameIndex=OP_NAME_SBB}},
+
+    {OP_NAME_CMP,    0b11111100, 0b00111000, 0, 0,     AddSubCmp_RegisterOrMemoryWithRegisterToEither, {.NameIndex=OP_NAME_CMP, .ParamCount=2}},
     {OP_NAME_CMP,    0b11111000, 0b10000000, 1, 0b111, AddSubCmp_ImmediateWithRegisterOrMemory,        {.NameIndex=OP_NAME_CMP}},
     {OP_NAME_CMP,    0b11111110, 0b00111100, 0, 0,     AddSubCmp_ImmediateWithAccumulator,             {.NameIndex=OP_NAME_CMP}},
+
+    {OP_NAME_LEA,    0b11111111, 0b10001101, 0, 0,     Lea, {.NameIndex=OP_NAME_LEA}},
+    {OP_NAME_LDS,    0b11111111, 0b11000101, 0, 0,     Lea, {.NameIndex=OP_NAME_LDS}},
+    {OP_NAME_LES,    0b11111111, 0b11000100, 0, 0,     Lea, {.NameIndex=OP_NAME_LES}},
 
     {OP_NAME_JE,     0b11111111, 0b01110100, 0, 0, Je, {0}},
     {OP_NAME_JL,     0b11111111, 0b01111100, 0, 0, Jl, {0}},
@@ -603,6 +878,30 @@ static op_definition OpTable[] =
     {OP_NAME_LOOPZ , 0b11111111, 0b11100001, 0, 0, Loopz, {0}},
     {OP_NAME_LOOPNZ, 0b11111111, 0b11100000, 0, 0, Loopnz, {0}},
     {OP_NAME_JCXZ,   0b11111111, 0b11100011, 0, 0, Jcxz, {0}},
+    
+    {OP_NAME_XLAT,   0b11111111, 0b11010111, 0, 0, OneByte, {.NameIndex=OP_NAME_XLAT}},
+
+    {OP_NAME_LAHF,   0b11111111, 0b10011111, 0, 0, OneByte, {.NameIndex=OP_NAME_LAHF}},
+    {OP_NAME_SAHF,   0b11111111, 0b10011110, 0, 0, OneByte, {.NameIndex=OP_NAME_SAHF}},
+    {OP_NAME_PUSHF,  0b11111111, 0b10011100, 0, 0, OneByte, {.NameIndex=OP_NAME_PUSHF}},
+    {OP_NAME_POPF,   0b11111111, 0b10011101, 0, 0, OneByte, {.NameIndex=OP_NAME_POPF}},
+    {OP_NAME_AAA,    0b11111111, 0b00110111, 0, 0, OneByte, {.NameIndex=OP_NAME_AAA}},
+    {OP_NAME_DAA,    0b11111111, 0b00100111, 0, 0, OneByte, {.NameIndex=OP_NAME_DAA}},
+
+    {OP_NAME_INTO,   0b11111111, 0b11001110, 0, 0, OneByte, {.NameIndex=OP_NAME_INTO}},
+    {OP_NAME_IRET,   0b11111111, 0b11001111, 0, 0, OneByte, {.NameIndex=OP_NAME_IRET}},
+    {OP_NAME_CLC,    0b11111111, 0b11111000, 0, 0, OneByte, {.NameIndex=OP_NAME_CLC}},
+    {OP_NAME_CMC,    0b11111111, 0b11110101, 0, 0, OneByte, {.NameIndex=OP_NAME_CMC}},
+    {OP_NAME_STC,    0b11111111, 0b11111001, 0, 0, OneByte, {.NameIndex=OP_NAME_STC}},
+    {OP_NAME_CLD,    0b11111111, 0b11111100, 0, 0, OneByte, {.NameIndex=OP_NAME_CLD}},
+    {OP_NAME_STD,    0b11111111, 0b11111101, 0, 0, OneByte, {.NameIndex=OP_NAME_STD}},
+    {OP_NAME_CLI,    0b11111111, 0b11111010, 0, 0, OneByte, {.NameIndex=OP_NAME_CLI}},
+    {OP_NAME_STI,    0b11111111, 0b11111011, 0, 0, OneByte, {.NameIndex=OP_NAME_STI}},
+    {OP_NAME_HLT,    0b11111111, 0b11110100, 0, 0, OneByte, {.NameIndex=OP_NAME_HLT}},
+    {OP_NAME_WAIT,   0b11111111, 0b10011011, 0, 0, OneByte, {.NameIndex=OP_NAME_WAIT}},
+
+    {OP_NAME_INC,    0b11111110, 0b11111110, 1, 0b000, AddSubCmp_RegisterOrMemoryWithRegisterToEither, {.NameIndex=OP_NAME_INC, .ParamCount=1}},
+    {OP_NAME_INC,    0b11111000, 0b01000000, 0, 0,     PushPop_Register,         {.NameIndex=OP_NAME_INC}},
 
     {OP_NAME_PUSH,   0b11111111, 0b11111111, 1, 0b110, PushPop_RegisterOrMemory, {.NameIndex=OP_NAME_PUSH}},
     {OP_NAME_PUSH,   0b11111000, 0b01010000, 0, 0,     PushPop_Register,         {.NameIndex=OP_NAME_PUSH}},
@@ -611,6 +910,12 @@ static op_definition OpTable[] =
     {OP_NAME_POP,    0b11111111, 0b10001111, 1, 0b000, PushPop_RegisterOrMemory, {.NameIndex=OP_NAME_POP}},
     {OP_NAME_POP,    0b11111000, 0b01011000, 0, 0,     PushPop_Register,         {.NameIndex=OP_NAME_POP}},
     {OP_NAME_POP,    0b11100111, 0b00000111, 0, 0,     PushPop_SegmentRegister,  {.NameIndex=OP_NAME_POP}},
+
+    {OP_NAME_IN,     0b11111110, 0b11100100, 0, 0, InOut_FixedPort,    {.NameIndex=OP_NAME_IN}},
+    {OP_NAME_IN,     0b11111110, 0b11101100, 0, 0, InOut_VariablePort, {.NameIndex=OP_NAME_IN}},
+    {OP_NAME_OUT,    0b11111110, 0b11100110, 0, 0, InOut_FixedPort,    {.NameIndex=OP_NAME_OUT, .SwapParams=1}},
+    {OP_NAME_OUT,    0b11111110, 0b11101110, 0, 0, InOut_VariablePort, {.NameIndex=OP_NAME_OUT, .SwapParams=1}},
+    {OP_NAME_XCHG,   0b11111000, 0b10010000, 0, 0, XchgAccumulator,    {.NameIndex=OP_NAME_XCHG}},
 };
 
 static char *EffectiveAddressLookup[8] =
@@ -724,13 +1029,9 @@ int main(int ArgCount, char **Args)
     int Result = 0;
     int HitError = 0;
 
-    u8 OpStream[1024*4] = {0};
-    op OpList[1024] = {0};
-    int OpCount = 0;
-
     char *Filename = Args[1];
     FILE *File = fopen(Filename, "rb");
-    size_t ByteLength = fread(OpStream, 1, 1024, File);
+    size_t ByteLength = fread(OpStream, 1, ArrayLength(OpStream), File);
 
     printf("bits 16\n");
 
