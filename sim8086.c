@@ -195,6 +195,10 @@ static int OpCount = 0;
 #define OP_NAME_ROR 71
 #define OP_NAME_RCL 72
 #define OP_NAME_RCR 73
+#define OP_NAME_AND 74
+#define OP_NAME_TEST 75
+#define OP_NAME_OR 76
+#define OP_NAME_XOR 77
 
 static char *OpNameLookup[] =
 {
@@ -271,7 +275,11 @@ static char *OpNameLookup[] =
     "rol",
     "ror",
     "rcl",
-    "rcr"
+    "rcr",
+    "and",
+    "test",
+    "or",
+    "xor",
 };
 
 // NOTE(chuck): Annoyingly, you cannot pass a struct literal as a function argument without casting it. So use a relativelyt short name here and stuff all possible options for all functions into this.
@@ -282,6 +290,7 @@ typedef struct
     int SwapParams; // NOTE(chuck): in/out reuse code but "out" uses the reverse order.
     int ParamCount;
     int ByteLength;
+    int NoSignExtension; // TODO(chuck): Tacking this on without much thought. Confusing to have this and SignExtend. Figure out a better way to handle this.
 } options;
 
 typedef struct
@@ -313,8 +322,18 @@ static void SetOpConfig(op *Op)
 
 static void SetParamToImm(u8 *IP, op *Op, int ParamIndex, options Options)
 {
+    int MaybeSignExtendAndWord = 0;
+    if(Options.NoSignExtension)
+    {
+        MaybeSignExtendAndWord = Op->Word;
+    }
+    else
+    {
+        MaybeSignExtendAndWord = (Options.SignExtend == 0) && Op->Word;
+    }
+
     Op->Param[ParamIndex].Type = Param_Immediate;
-    if((Options.SignExtend == 0) && Op->Word)
+    if(MaybeSignExtendAndWord)
     {
         Op->Param[ParamIndex].ImmediateValue = *(u16 *)&IP[0];
 
@@ -547,12 +566,22 @@ static op MovImmediateToRegister(u8 *IP, options DecodeOptions)
 
 static void SharedImmediateToRegisterOrMemory(u8 *IP, op *Op, options Options)
 {
+    int MaybeSignExtendAndWord = 0;
+    if(Options.NoSignExtension)
+    {
+        MaybeSignExtendAndWord = Op->Word;
+    }
+    else
+    {
+        MaybeSignExtendAndWord = (Options.SignExtend == 0) && Op->Word;
+    }
+
     Op->EmitSize = 1;
     if(Op->Mode == REGISTER_MODE_NO_DISPLACEMENT)
     {
         SetParamToReg(IP + 2, Op, DESTINATION, GetRegisterIndex(Op->RegB, Op->Word));
         SetParamToImm(IP + 2, Op, SOURCE, Options);
-        Op->ByteLength = ((Options.SignExtend == 0) && Op->Word) ? 4 : 3;
+        Op->ByteLength = MaybeSignExtendAndWord ? 4 : 3;
     }
     else if(Op->Mode == MEMORY_MODE_MAYBE_NO_DISPLACEMENT)
     {
@@ -560,22 +589,29 @@ static void SharedImmediateToRegisterOrMemory(u8 *IP, op *Op, options Options)
         {
             SetParamToMem(IP + 2, Op, DESTINATION, Op->RegB, 0, 0, 0);
             SetParamToImm(IP + 2, Op, SOURCE, Options);
-            Op->ByteLength = ((Options.SignExtend == 0) && Op->Word) ? 4 : 3;
+            Op->ByteLength = MaybeSignExtendAndWord ? 4 : 3;
         }
         else
         {
             SetParamToMemDirectAddress(IP + 2, Op, DESTINATION, Op->Word);
             SetParamToImm(IP + 4, Op, SOURCE, Options);
-            Op->ByteLength = ((Options.SignExtend == 0) && Op->Word) ? 6 : 5;
+            Op->ByteLength = MaybeSignExtendAndWord ? 6 : 5;
         }
     }
     else if((Op->Mode == MEMORY_MODE_8BIT_DISPLACEMENT) ||
             (Op->Mode == MEMORY_MODE_16BIT_DISPLACEMENT))
     {
-        SetParamToMem(IP + 2, Op, DESTINATION, Op->RegB, 1,
-                      Op->Mode == MEMORY_MODE_16BIT_DISPLACEMENT, 1);
-        SetParamToImm(IP + 4, Op, SOURCE, Options);
-        Op->ByteLength = ((Options.SignExtend == 0) && Op->Word) ? 6 : 5;
+        // NOTE(chuck): It took me a while to realize there were back-to-back variable-sized encodings here. I do not claim to be an intelligent man!
+        int ByteLength = 2;
+
+        int WordDisplacement = (Op->Mode == MEMORY_MODE_16BIT_DISPLACEMENT);
+        SetParamToMem(IP + 2, Op, DESTINATION, Op->RegB, 1, WordDisplacement, 1);
+        ByteLength += WordDisplacement ? 2 : 1;
+
+        SetParamToImm(IP + ByteLength, Op, SOURCE, Options);
+        ByteLength += MaybeSignExtendAndWord ? 2 : 1;
+
+        Op->ByteLength = ByteLength;
     }
 }
 
@@ -786,7 +822,12 @@ static op AddSubCmp_ImmediateWithRegisterOrMemory(u8 *IP, options DecodeOptions)
 {
     op Op = {DecodeOptions.NameIndex, IP, 2, 0};
     SetOpConfig(&Op);
-    SharedImmediateToRegisterOrMemory(IP, &Op, (options){.SignExtend = Op.Sign});
+    options Options =
+    {
+        .SignExtend = Op.Sign,
+        .NoSignExtension = DecodeOptions.NoSignExtension,
+    };
+    SharedImmediateToRegisterOrMemory(IP, &Op, Options);
     return(Op);
 }
 
@@ -982,6 +1023,22 @@ static op_definition OpTable[] =
     {OP_NAME_CMP,    0b11111100, 0b00111000, 0, 0,     AddSubCmp_RegisterOrMemoryWithRegisterToEither, {.NameIndex=OP_NAME_CMP, .ParamCount=2}},
     {OP_NAME_CMP,    0b11111000, 0b10000000, 1, 0b111, AddSubCmp_ImmediateWithRegisterOrMemory,        {.NameIndex=OP_NAME_CMP}},
     {OP_NAME_CMP,    0b11111110, 0b00111100, 0, 0,     AddSubCmp_ImmediateWithAccumulator,             {.NameIndex=OP_NAME_CMP}},
+
+    {OP_NAME_AND,    0b11111100, 0b00100000, 0, 0,     AddSubCmp_RegisterOrMemoryWithRegisterToEither, {.NameIndex=OP_NAME_AND, .ParamCount=2}},
+    {OP_NAME_AND,    0b11111000, 0b10000000, 1, 0b100, AddSubCmp_ImmediateWithRegisterOrMemory,        {.NameIndex=OP_NAME_AND, .NoSignExtension=1}},
+    {OP_NAME_AND,    0b11111110, 0b00100100, 0, 0,     AddSubCmp_ImmediateWithAccumulator,             {.NameIndex=OP_NAME_AND}},
+
+    {OP_NAME_TEST,   0b11111100, 0b10000100, 0, 0,     AddSubCmp_RegisterOrMemoryWithRegisterToEither, {.NameIndex=OP_NAME_TEST, .ParamCount=2}},
+    {OP_NAME_TEST,   0b11111110, 0b11110110, 1, 0b000, AddSubCmp_ImmediateWithRegisterOrMemory,        {.NameIndex=OP_NAME_TEST, .NoSignExtension=1}},
+    {OP_NAME_TEST,   0b11111110, 0b10101000, 0, 0,     AddSubCmp_ImmediateWithAccumulator,             {.NameIndex=OP_NAME_TEST}},
+
+    {OP_NAME_OR,     0b11111100, 0b00001000, 0, 0,     AddSubCmp_RegisterOrMemoryWithRegisterToEither, {.NameIndex=OP_NAME_OR, .ParamCount=2}},
+    {OP_NAME_OR,     0b11111000, 0b10000000, 1, 0b001, AddSubCmp_ImmediateWithRegisterOrMemory,        {.NameIndex=OP_NAME_OR, .NoSignExtension=1}},
+    {OP_NAME_OR,     0b11111110, 0b00001100, 0, 0,     AddSubCmp_ImmediateWithAccumulator,             {.NameIndex=OP_NAME_OR}},
+
+    {OP_NAME_XOR,    0b11111100, 0b00110000, 0, 0,     AddSubCmp_RegisterOrMemoryWithRegisterToEither, {.NameIndex=OP_NAME_XOR, .ParamCount=2}},
+    {OP_NAME_XOR,    0b11111000, 0b10000000, 1, 0b110, AddSubCmp_ImmediateWithRegisterOrMemory,        {.NameIndex=OP_NAME_XOR, .NoSignExtension=1}},
+    {OP_NAME_XOR,    0b11111110, 0b00110100, 0, 0,     AddSubCmp_ImmediateWithAccumulator,             {.NameIndex=OP_NAME_XOR}},
 
     {OP_NAME_LEA,    0b11111111, 0b10001101, 0, 0,     Lea, {.NameIndex=OP_NAME_LEA}},
     {OP_NAME_LDS,    0b11111111, 0b11000101, 0, 0,     Lea, {.NameIndex=OP_NAME_LDS}},
