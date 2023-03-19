@@ -1,5 +1,3 @@
-// NOTE(chuck): Homework for listing 42 (challenge). Supports jump labels too. I emit byte/word prefixes too aggressively in some cases I think? But NASM doesn't care so I don't care. :^)
-
 #include <windows.h>
 #include <stdio.h>
 
@@ -491,7 +489,7 @@ static void SharedRegisterOrMemoryVsRegister(parsing_context *Context, op *Op)
     {
         SetParamToReg(IP + 2, Op, DESTINATION, GetRegisterIndex(Op->RegB, Op->Word));
         SetParamToReg(IP + 2, Op, SOURCE, GetRegisterIndex(Op->RegA, Op->Word));
-        Op->ByteLength = 2; // TODO(chuck): Maybe just increment pointers like any standard file format parser does instead. Not sure why I did this everywhere.
+        Op->ByteLength = 2;
     }
     else if(Op->Mode == MEMORY_MODE_MAYBE_NO_DISPLACEMENT)
     {
@@ -512,17 +510,9 @@ static void SharedRegisterOrMemoryVsRegister(parsing_context *Context, op *Op)
         }
         else // NOTE(chuck): Direct address
         {
-            if(Op->Dest)
-            {
-                SetParamToReg(IP, Op, DESTINATION, GetRegisterIndex(Op->RegA, Op->Word));
-                SetParamToMemDirectAddress(IP + 2, Op, SOURCE, Op->Word);
-                Op->ByteLength = Op->Word ? 4 : 3;
-            }
-            else
-            {
-                Op->Error = 1;
-                Op->ByteLength = 1; // NOTE(chuck): This is important for the disassembled listing of the op bytes.
-            }
+            SetParamToReg(IP, Op, DESTINATION, GetRegisterIndex(Op->RegA, Op->Word));
+            SetParamToMemDirectAddress(IP + 2, Op, SOURCE, Op->Word);
+            Op->ByteLength = Op->Word ? 4 : 3;
         }
     }
     else if((Op->Mode == MEMORY_MODE_8BIT_DISPLACEMENT) ||
@@ -580,7 +570,7 @@ static op Xchg_RegisterOrMemoryWithRegister(parsing_context *Context, options De
             {
                 SetParamToReg(IP, Op, DESTINATION, GetRegisterIndex(Op->RegA, Op->Word));
                 SetParamToMemDirectAddress(IP + 2, Op, SOURCE, Op->Word);
-                Op->ByteLength = 4;//Op->Word ? 4 : 3;
+                Op->ByteLength = 4;
             }
             else
             {
@@ -609,7 +599,6 @@ static op Xchg_RegisterOrMemoryWithRegister(parsing_context *Context, options De
     return(Opp);
 }
 
-// ::: 1 0 0 0 1 0 d w | mod  reg   r/m  |    (DISP-LO)    |    (DISP-HI)    |
 static op MovRegisterOrMemoryToOrFromRegister(parsing_context *Context, options DecodeOptions)
 {
     u8 *IP = Context->IP;
@@ -627,7 +616,6 @@ static void SharedImmediateToRegister(parsing_context *Context, op *Op, int Regi
     Op->ByteLength = Op->Word ? 3 : 2;
 }
 
-// ::: 1 0 1 1 w  reg  |      data       |   data if w=1   |
 static op MovImmediateToRegister(parsing_context *Context, options DecodeOptions)
 {
     u8 *IP = Context->IP;
@@ -690,7 +678,6 @@ static void SharedImmediateToRegisterOrMemory(parsing_context *Context, op *Op, 
     }
 }
 
-// ::: 1 1 0 0 0 1 1 w | mod 0 0 0  r/m  | (DISP-LO) | (DISP-HI) | data | data if w=1 |
 static op MovImmediateToRegisterOrMemory(parsing_context *Context, options DecodeOptions)
 {
     u8 *IP = Context->IP;
@@ -700,7 +687,6 @@ static op MovImmediateToRegisterOrMemory(parsing_context *Context, options Decod
     return(Op);
 }
 
-// ::: 1 0 1 0 0 0 0 w |     addr-lo     |     addr-hi     |
 static op MovMemoryToAccumulator(parsing_context *Context, options DecodeOptions)
 {
     u8 *IP = Context->IP;
@@ -712,7 +698,6 @@ static op MovMemoryToAccumulator(parsing_context *Context, options DecodeOptions
     return(Op);
 }
 
-// ::: 1 0 1 0 0 0 1 w |     addr-lo     |     addr-hi     |
 static op MovAccumulatorToMemory(parsing_context *Context, options DecodeOptions)
 {
     u8 *IP = Context->IP;
@@ -775,7 +760,6 @@ static op MovSegmentRegisterToRegisterOrMemory(parsing_context *Context, options
     return(Opp);
 }
 
-// ::: 0 0 0 0 0 0 d w | mod  reg   r/m  |    (DISP-LO)    |    (DISP-HI)    |
 static op AddSubCmp_RegisterOrMemoryWithRegisterToEither(parsing_context *Context, options DecodeOptions)
 {
     u8 *IP = Context->IP;
@@ -853,10 +837,10 @@ static op Rotate(parsing_context *Context, options DecodeOptions)
         }
         else // NOTE(chuck): Direct address
         {
-            SetParamToMemDirectAddress(IP + 2, Op, DESTINATION, 1);//Op->Word);
+            SetParamToMemDirectAddress(IP + 2, Op, DESTINATION, 1);
             Op->Param[DESTINATION].ByteSizeQualifier = Op->Word;
             Op->EmitSize = 1;
-            Op->ByteLength = 4;//Op->Word ? 4 : 3;
+            Op->ByteLength = 4;
         }
     }
     else if((Op->Mode == MEMORY_MODE_8BIT_DISPLACEMENT) ||
@@ -882,7 +866,6 @@ static op Rotate(parsing_context *Context, options DecodeOptions)
     return(Opp);
 }
 
-// NOTE(chuck): Copy/pasted from AddSubCmp_RegisterOrMemoryWithRegisterToEither and tweaked.
 static op Lea(parsing_context *Context, options DecodeOptions)
 {
     u8 *IP = Context->IP;
@@ -895,38 +878,21 @@ static op Lea(parsing_context *Context, options DecodeOptions)
     {
         SetParamToReg(IP + 2, Op, DESTINATION, GetRegisterIndex(Op->RegB, Op->Word));
         SetParamToReg(IP + 2, Op, SOURCE, GetRegisterIndex(Op->RegA, Op->Word));
-        Op->ByteLength = 2; // TODO(chuck): Maybe just increment pointers like any standard file format parser does instead. Not sure why I did this everywhere.
+        Op->ByteLength = 2;
     }
     else if(Op->Mode == MEMORY_MODE_MAYBE_NO_DISPLACEMENT)
     {
         if(Op->RegB != 0x06)
         {
-            // if(Op->Dest)
-            // {
-            //     SetParamToReg(IP + 2, Op, DESTINATION, GetRegisterIndex(Op->RegA, Op->Word));
-            //     SetParamToMem(IP + 2, Op, SOURCE, Op->RegB, 0, 0, 0);
-            // }
-            // else
-            // {
-                SetParamToMem(IP + 2, Op, DESTINATION, Op->RegB, 0, 0, 0);
-                SetParamToReg(IP + 2, Op, SOURCE, GetRegisterIndex(Op->RegA, Op->Word));
-            // }
+            SetParamToMem(IP + 2, Op, DESTINATION, Op->RegB, 0, 0, 0);
+            SetParamToReg(IP + 2, Op, SOURCE, GetRegisterIndex(Op->RegA, Op->Word));
 
             Op->ByteLength = 2;
         }
         else // NOTE(chuck): Direct address
         {
-            // if(Op->Dest)
-            // {
-            //     SetParamToReg(IP, Op, DESTINATION, GetRegisterIndex(Op->RegA, Op->Word));
-            //     SetParamToMemDirectAddress(IP + 2, Op, SOURCE, Op->Word);
-            //     Op->ByteLength = Op->Word ? 4 : 3;
-            // }
-            // else
-            // {
-                Op->Error = 1;
-                Op->ByteLength = 1;
-            // }
+            Op->Error = 1;
+            Op->ByteLength = 1;
         }
     }
     else if((Op->Mode == MEMORY_MODE_8BIT_DISPLACEMENT) ||
@@ -934,23 +900,14 @@ static op Lea(parsing_context *Context, options DecodeOptions)
     {
         int WordDisplacement = (Op->Mode == MEMORY_MODE_16BIT_DISPLACEMENT);
         Op->ByteLength = WordDisplacement ? 4 : 3;
-        // if(Op->Dest)
-        // {
-        //     SetParamToReg(IP + 2, Op, DESTINATION, GetRegisterIndex(Op->RegA, Op->Word));
-        //     SetParamToMem(IP + 2, Op, SOURCE, Op->RegB, 1, WordDisplacement, 1);
-        // }
-        // else
-        // {
-            // NOTE(chuck): LEA uses reverse ordering from ADD/SUB/BMP
-            SetParamToReg(IP + 2, Op, DESTINATION, GetRegisterIndex(Op->RegA, Op->Word));
-            SetParamToMem(IP + 2, Op, SOURCE, Op->RegB, 1, WordDisplacement, 1);
-        // }
+        // NOTE(chuck): LEA uses reverse ordering from ADD/SUB/BMP
+        SetParamToReg(IP + 2, Op, DESTINATION, GetRegisterIndex(Op->RegA, Op->Word));
+        SetParamToMem(IP + 2, Op, SOURCE, Op->RegB, 1, WordDisplacement, 1);
     }
 
     return(Opp);
 }
 
-// ::: 1 0 0 0 0 0 s w | mod 0 0 0  r/m  | (DISP-LO) | (DISP-HI) | data | data if w=1 |
 static op AddSubCmp_ImmediateWithRegisterOrMemory(parsing_context *Context, options DecodeOptions)
 {
     u8 *IP = Context->IP;
