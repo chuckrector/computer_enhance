@@ -114,6 +114,7 @@ typedef struct
     {
         int RegA;
         int Ext;
+        int SegmentRegister;
     };
     int RegB;
     int EmitSize;
@@ -123,6 +124,8 @@ typedef struct
 
     int UseSegmentOverride;
     int SegmentOverride;
+    char Suffix; // NOTE(chucK): For "retf"
+    int IsFar; // NOTE(chuck): For "call far"
 } op;
 
 static u8 OpStream[1024*4] = {0};
@@ -334,7 +337,15 @@ typedef struct
     int ByteLength;
     int NoSignExtension; // TODO(chuck): Tacking this on without much thought. Confusing to have this and SignExtend. Figure out a better way to handle this.
     int ForceSigned;
+    char Suffix; // NOTE(chuck): For "retf"
+    int IsFar; // NOTE(chuck): For "call far"
 } options;
+
+typedef struct
+{
+    u8 *OpStream;
+    u8 *IP;
+} parsing_context;
 
 typedef struct
 {
@@ -343,7 +354,7 @@ typedef struct
     int Prefix;
     int UseExtension;
     int Extension;
-    op (*Decode)(u8 *IP, options Options);
+    op (*Decode)(parsing_context *Context, options Options);
     options DecodeOptions;
 } op_definition;
 
@@ -473,8 +484,9 @@ static void SetParamToMemDirectAddress(u8 *IP, op *Op, int ParamIndex, int Word)
     }
 }
 
-static void SharedRegisterOrMemoryVsRegister(u8 *IP, op *Op)
+static void SharedRegisterOrMemoryVsRegister(parsing_context *Context, op *Op)
 {
+    u8 *IP = Context->IP;
     if(Op->Mode == REGISTER_MODE_NO_DISPLACEMENT) // 0b11
     {
         SetParamToReg(IP + 2, Op, DESTINATION, GetRegisterIndex(Op->RegB, Op->Word));
@@ -531,8 +543,9 @@ static void SharedRegisterOrMemoryVsRegister(u8 *IP, op *Op)
     }
 }
 
-static op Xchg_RegisterOrMemoryWithRegister(u8 *IP, options DecodeOptions)
+static op Xchg_RegisterOrMemoryWithRegister(parsing_context *Context, options DecodeOptions)
 {
+    u8 *IP = Context->IP;
     op Opp = {DecodeOptions.NameIndex, IP, 2, 0};
     SetOpConfig(&Opp);
 
@@ -597,33 +610,37 @@ static op Xchg_RegisterOrMemoryWithRegister(u8 *IP, options DecodeOptions)
 }
 
 // ::: 1 0 0 0 1 0 d w | mod  reg   r/m  |    (DISP-LO)    |    (DISP-HI)    |
-static op MovRegisterOrMemoryToOrFromRegister(u8 *IP, options DecodeOptions)
+static op MovRegisterOrMemoryToOrFromRegister(parsing_context *Context, options DecodeOptions)
 {
+    u8 *IP = Context->IP;
     op Op = {OP_NAME_MOV, IP, 2, 0};
     SetOpConfig(&Op);
-    SharedRegisterOrMemoryVsRegister(IP, &Op);
+    SharedRegisterOrMemoryVsRegister(Context, &Op);
     return(Op);
 }
 
-static void SharedImmediateToRegister(u8 *IP, op *Op, int RegisterIndex, options Options)
+static void SharedImmediateToRegister(parsing_context *Context, op *Op, int RegisterIndex, options Options)
 {
+    u8 *IP = Context->IP;
     SetParamToReg(IP, Op, DESTINATION, RegisterIndex);
     SetParamToImm(IP + 1, Op, SOURCE, Options);
     Op->ByteLength = Op->Word ? 3 : 2;
 }
 
 // ::: 1 0 1 1 w  reg  |      data       |   data if w=1   |
-static op MovImmediateToRegister(u8 *IP, options DecodeOptions)
+static op MovImmediateToRegister(parsing_context *Context, options DecodeOptions)
 {
+    u8 *IP = Context->IP;
     op Op = {OP_NAME_MOV, IP, 2, 0};
     Op.Word = IP[0] & 0b00001000;
     Op.RegA = IP[0] & 0b00000111;
-    SharedImmediateToRegister(IP, &Op, GetRegisterIndex(Op.RegA, Op.Word), (options){0});
+    SharedImmediateToRegister(Context, &Op, GetRegisterIndex(Op.RegA, Op.Word), (options){0});
     return(Op);
 }
 
-static void SharedImmediateToRegisterOrMemory(u8 *IP, op *Op, options Options)
+static void SharedImmediateToRegisterOrMemory(parsing_context *Context, op *Op, options Options)
 {
+    u8 *IP = Context->IP;
     int MaybeSignExtendAndWord = 0;
     if(Options.NoSignExtension)
     {
@@ -674,17 +691,19 @@ static void SharedImmediateToRegisterOrMemory(u8 *IP, op *Op, options Options)
 }
 
 // ::: 1 1 0 0 0 1 1 w | mod 0 0 0  r/m  | (DISP-LO) | (DISP-HI) | data | data if w=1 |
-static op MovImmediateToRegisterOrMemory(u8 *IP, options DecodeOptions)
+static op MovImmediateToRegisterOrMemory(parsing_context *Context, options DecodeOptions)
 {
+    u8 *IP = Context->IP;
     op Op = {OP_NAME_MOV, IP, 2, 0};
     SetOpConfig(&Op);
-    SharedImmediateToRegisterOrMemory(IP, &Op, (options){0});
+    SharedImmediateToRegisterOrMemory(Context, &Op, (options){0});
     return(Op);
 }
 
 // ::: 1 0 1 0 0 0 0 w |     addr-lo     |     addr-hi     |
-static op MovMemoryToAccumulator(u8 *IP, options DecodeOptions)
+static op MovMemoryToAccumulator(parsing_context *Context, options DecodeOptions)
 {
+    u8 *IP = Context->IP;
     op Op = {OP_NAME_MOV, IP, 2, 0};
     SetOpConfig(&Op);
     SetParamToReg(IP + 1, &Op, DESTINATION, REGISTER_NAME_AX);
@@ -694,8 +713,9 @@ static op MovMemoryToAccumulator(u8 *IP, options DecodeOptions)
 }
 
 // ::: 1 0 1 0 0 0 1 w |     addr-lo     |     addr-hi     |
-static op MovAccumulatorToMemory(u8 *IP, options DecodeOptions)
+static op MovAccumulatorToMemory(parsing_context *Context, options DecodeOptions)
 {
+    u8 *IP = Context->IP;
     op Op = {OP_NAME_MOV, IP, 2, 0};
     Op.Word = IP[0] & 1;
     SetParamToMemDirectAddress(IP + 1, &Op, DESTINATION, Op.Word);
@@ -704,17 +724,70 @@ static op MovAccumulatorToMemory(u8 *IP, options DecodeOptions)
     return(Op);
 }
 
-// ::: 0 0 0 0 0 0 d w | mod  reg   r/m  |    (DISP-LO)    |    (DISP-HI)    |
-static op AddSubCmp_RegisterOrMemoryWithRegisterToEither(u8 *IP, options DecodeOptions)
+static op MovSegmentRegisterToRegisterOrMemory(parsing_context *Context, options DecodeOptions)
 {
+    u8 *IP = Context->IP;
+    op Opp = {OP_NAME_MOV, IP, 2, 0};
+    SetOpConfig(&Opp);
+    Opp.Word = 1;
+
+    options Options = {0};
+    op *Op = &Opp;
+    int MaybeSignExtendAndWord = 0;
+    if(Options.NoSignExtension)
+    {
+        MaybeSignExtendAndWord = Op->Word;
+    }
+    else
+    {
+        MaybeSignExtendAndWord = (Options.SignExtend == 0) && Op->Word;
+    }
+
+    if(Op->Mode == REGISTER_MODE_NO_DISPLACEMENT)
+    {
+        SetParamToReg(IP + 2, Op, DESTINATION, GetRegisterIndex(Op->RegB, Op->Word));
+        Op->ByteLength = 2;
+    }
+    else if(Op->Mode == MEMORY_MODE_MAYBE_NO_DISPLACEMENT)
+    {
+        if(Op->RegB != 0x06)
+        {
+            SetParamToMem(IP + 2, Op, DESTINATION, Op->RegB, 0, 0, 0);
+            Op->ByteLength = 2;
+        }
+        else
+        {
+            SetParamToMemDirectAddress(IP + 2, Op, DESTINATION, Op->Word);
+            Op->ByteLength = 4;
+        }
+    }
+    else if((Op->Mode == MEMORY_MODE_8BIT_DISPLACEMENT) ||
+            (Op->Mode == MEMORY_MODE_16BIT_DISPLACEMENT))
+    {
+        int WordDisplacement = (Op->Mode == MEMORY_MODE_16BIT_DISPLACEMENT);
+        SetParamToMem(IP + 2, Op, DESTINATION, Op->RegB, 1, WordDisplacement, 1);
+        Op->ByteLength = WordDisplacement ? 4 : 3;
+    }
+
+    Op->Param[SOURCE].Type = Param_SegmentRegister;
+    Op->Param[SOURCE].RegisterOrMemoryIndex = Op->SegmentRegister;
+
+    return(Opp);
+}
+
+// ::: 0 0 0 0 0 0 d w | mod  reg   r/m  |    (DISP-LO)    |    (DISP-HI)    |
+static op AddSubCmp_RegisterOrMemoryWithRegisterToEither(parsing_context *Context, options DecodeOptions)
+{
+    u8 *IP = Context->IP;
     op Op = {DecodeOptions.NameIndex, IP, DecodeOptions.ParamCount, 0};
     SetOpConfig(&Op);
-    SharedRegisterOrMemoryVsRegister(IP, &Op);
+    SharedRegisterOrMemoryVsRegister(Context, &Op);
     return(Op);
 }
 
-static op IncDec(u8 *IP, options DecodeOptions)
+static op IncDec(parsing_context *Context, options DecodeOptions)
 {
+    u8 *IP = Context->IP;
     op Opp = {DecodeOptions.NameIndex, IP, 1, 0};
 
     op *Op = &Opp;
@@ -757,8 +830,9 @@ static op IncDec(u8 *IP, options DecodeOptions)
     return(Opp);
 }
 
-static op Rotate(u8 *IP, options DecodeOptions)
+static op Rotate(parsing_context *Context, options DecodeOptions)
 {
+    u8 *IP = Context->IP;
     op Opp = {DecodeOptions.NameIndex, IP, 2, 0};
     SetOpConfig(&Opp);
 
@@ -809,8 +883,9 @@ static op Rotate(u8 *IP, options DecodeOptions)
 }
 
 // NOTE(chuck): Copy/pasted from AddSubCmp_RegisterOrMemoryWithRegisterToEither and tweaked.
-static op Lea(u8 *IP, options DecodeOptions)
+static op Lea(parsing_context *Context, options DecodeOptions)
 {
+    u8 *IP = Context->IP;
     op Opp = {DecodeOptions.NameIndex, IP, 2, 0};
     SetOpConfig(&Opp);
     Opp.Word = 1; // NOTE(chuck): LEA-specific
@@ -876,8 +951,9 @@ static op Lea(u8 *IP, options DecodeOptions)
 }
 
 // ::: 1 0 0 0 0 0 s w | mod 0 0 0  r/m  | (DISP-LO) | (DISP-HI) | data | data if w=1 |
-static op AddSubCmp_ImmediateWithRegisterOrMemory(u8 *IP, options DecodeOptions)
+static op AddSubCmp_ImmediateWithRegisterOrMemory(parsing_context *Context, options DecodeOptions)
 {
+    u8 *IP = Context->IP;
     op Op = {DecodeOptions.NameIndex, IP, 2, 0};
     SetOpConfig(&Op);
     options Options =
@@ -885,22 +961,24 @@ static op AddSubCmp_ImmediateWithRegisterOrMemory(u8 *IP, options DecodeOptions)
         .SignExtend = Op.Sign,
         .NoSignExtension = DecodeOptions.NoSignExtension,
     };
-    SharedImmediateToRegisterOrMemory(IP, &Op, Options);
+    SharedImmediateToRegisterOrMemory(Context, &Op, Options);
     return(Op);
 }
 
-static op AddSubCmp_ImmediateWithAccumulator(u8 *IP, options DecodeOptions)
+static op AddSubCmp_ImmediateWithAccumulator(parsing_context *Context, options DecodeOptions)
 {
+    u8 *IP = Context->IP;
     op Op = {DecodeOptions.NameIndex, IP, 2, 0};
     Op.Word = IP[0] & 0b00000001;
-    SharedImmediateToRegister(IP, &Op,
+    SharedImmediateToRegister(Context, &Op,
                               Op.Word ? REGISTER_NAME_AX : REGISTER_NAME_AL,
                               (options){.SignExtend = Op.Word ? 0 : 1});
     return(Op);
 }
 
-static op SharedRelativeJump(u8 *IP, int NameIndex)
+static op SharedRelativeJump(parsing_context *Context, int NameIndex)
 {
+    u8 *IP = Context->IP;
     op Op = {NameIndex, IP, 1, 0};
     Op.Param[0].Type = Param_Immediate;
     Op.Param[0].ImmediateValue = (s8)IP[1];
@@ -910,29 +988,30 @@ static op SharedRelativeJump(u8 *IP, int NameIndex)
 }
 
 // TODO(chuck): Make a single handler for these kinda things? This is kinda tedious and annoying.
-static op Je(u8 *IP, options DecodeOptions)     { return SharedRelativeJump(IP, OP_NAME_JE);  }
-static op Jl(u8 *IP, options DecodeOptions)     { return SharedRelativeJump(IP, OP_NAME_JL);  }
-static op Jle(u8 *IP, options DecodeOptions)    { return SharedRelativeJump(IP, OP_NAME_JLE); }
-static op Jb(u8 *IP, options DecodeOptions)     { return SharedRelativeJump(IP, OP_NAME_JB);  }
-static op Jbe(u8 *IP, options DecodeOptions)    { return SharedRelativeJump(IP, OP_NAME_JBE); }
-static op Jp(u8 *IP, options DecodeOptions)     { return SharedRelativeJump(IP, OP_NAME_JP);  }
-static op Jo(u8 *IP, options DecodeOptions)     { return SharedRelativeJump(IP, OP_NAME_JO);  }
-static op Js(u8 *IP, options DecodeOptions)     { return SharedRelativeJump(IP, OP_NAME_JS);  }
-static op Jnz(u8 *IP, options DecodeOptions)    { return SharedRelativeJump(IP, OP_NAME_JNZ); }
-static op Jnl(u8 *IP, options DecodeOptions)    { return SharedRelativeJump(IP, OP_NAME_JNL); }
-static op Jg(u8 *IP, options DecodeOptions)     { return SharedRelativeJump(IP, OP_NAME_JG);  }
-static op Jnb(u8 *IP, options DecodeOptions)    { return SharedRelativeJump(IP, OP_NAME_JNB); }
-static op Ja(u8 *IP, options DecodeOptions)     { return SharedRelativeJump(IP, OP_NAME_JA);  }
-static op Jnp(u8 *IP, options DecodeOptions)    { return SharedRelativeJump(IP, OP_NAME_JNP); }
-static op Jno(u8 *IP, options DecodeOptions)    { return SharedRelativeJump(IP, OP_NAME_JNO); }
-static op Jns(u8 *IP, options DecodeOptions)    { return SharedRelativeJump(IP, OP_NAME_JNS); }
-static op Loop(u8 *IP, options DecodeOptions)   { return SharedRelativeJump(IP, OP_NAME_LOOP);   }
-static op Loopz(u8 *IP, options DecodeOptions)  { return SharedRelativeJump(IP, OP_NAME_LOOPZ);  }
-static op Loopnz(u8 *IP, options DecodeOptions) { return SharedRelativeJump(IP, OP_NAME_LOOPNZ); }
-static op Jcxz(u8 *IP, options DecodeOptions)   { return SharedRelativeJump(IP, OP_NAME_JCXZ);   }
+static op Je(parsing_context *Context, options DecodeOptions)     { return SharedRelativeJump(Context, OP_NAME_JE);  }
+static op Jl(parsing_context *Context, options DecodeOptions)     { return SharedRelativeJump(Context, OP_NAME_JL);  }
+static op Jle(parsing_context *Context, options DecodeOptions)    { return SharedRelativeJump(Context, OP_NAME_JLE); }
+static op Jb(parsing_context *Context, options DecodeOptions)     { return SharedRelativeJump(Context, OP_NAME_JB);  }
+static op Jbe(parsing_context *Context, options DecodeOptions)    { return SharedRelativeJump(Context, OP_NAME_JBE); }
+static op Jp(parsing_context *Context, options DecodeOptions)     { return SharedRelativeJump(Context, OP_NAME_JP);  }
+static op Jo(parsing_context *Context, options DecodeOptions)     { return SharedRelativeJump(Context, OP_NAME_JO);  }
+static op Js(parsing_context *Context, options DecodeOptions)     { return SharedRelativeJump(Context, OP_NAME_JS);  }
+static op Jnz(parsing_context *Context, options DecodeOptions)    { return SharedRelativeJump(Context, OP_NAME_JNZ); }
+static op Jnl(parsing_context *Context, options DecodeOptions)    { return SharedRelativeJump(Context, OP_NAME_JNL); }
+static op Jg(parsing_context *Context, options DecodeOptions)     { return SharedRelativeJump(Context, OP_NAME_JG);  }
+static op Jnb(parsing_context *Context, options DecodeOptions)    { return SharedRelativeJump(Context, OP_NAME_JNB); }
+static op Ja(parsing_context *Context, options DecodeOptions)     { return SharedRelativeJump(Context, OP_NAME_JA);  }
+static op Jnp(parsing_context *Context, options DecodeOptions)    { return SharedRelativeJump(Context, OP_NAME_JNP); }
+static op Jno(parsing_context *Context, options DecodeOptions)    { return SharedRelativeJump(Context, OP_NAME_JNO); }
+static op Jns(parsing_context *Context, options DecodeOptions)    { return SharedRelativeJump(Context, OP_NAME_JNS); }
+static op Loop(parsing_context *Context, options DecodeOptions)   { return SharedRelativeJump(Context, OP_NAME_LOOP);   }
+static op Loopz(parsing_context *Context, options DecodeOptions)  { return SharedRelativeJump(Context, OP_NAME_LOOPZ);  }
+static op Loopnz(parsing_context *Context, options DecodeOptions) { return SharedRelativeJump(Context, OP_NAME_LOOPNZ); }
+static op Jcxz(parsing_context *Context, options DecodeOptions)   { return SharedRelativeJump(Context, OP_NAME_JCXZ);   }
 
-static op PushPop_RegisterOrMemory(u8 *IP, options DecodeOptions)
+static op PushPop_RegisterOrMemory(parsing_context *Context, options DecodeOptions)
 {
+    u8 *IP = Context->IP;
     op Op = {DecodeOptions.NameIndex, IP, 1, 0};
     SetOpConfig(&Op);
 
@@ -968,8 +1047,9 @@ static op PushPop_RegisterOrMemory(u8 *IP, options DecodeOptions)
     return(Op);
 }
 
-static op PushPop_Register(u8 *IP, options DecodeOptions)
+static op PushPop_Register(parsing_context *Context, options DecodeOptions)
 {
+    u8 *IP = Context->IP;
     op Op = {DecodeOptions.NameIndex, IP, 1, 0};
     int Register = IP[0] & 0b111;
     SetParamToReg(IP, &Op, DESTINATION, GetRegisterIndex(Register, 1));
@@ -977,8 +1057,9 @@ static op PushPop_Register(u8 *IP, options DecodeOptions)
     return(Op);
 }
 
-static op PushPop_SegmentRegister(u8 *IP, options DecodeOptions)
+static op PushPop_SegmentRegister(parsing_context *Context, options DecodeOptions)
 {
+    u8 *IP = Context->IP;
     op Op = {DecodeOptions.NameIndex, IP, 1, 0};
     int SegmentRegister = (IP[0] & 0b00011000) >> 3;
     Op.Param[DESTINATION].Type = Param_SegmentRegister;
@@ -987,8 +1068,9 @@ static op PushPop_SegmentRegister(u8 *IP, options DecodeOptions)
     return(Op);
 }
 
-static op XchgAccumulator(u8 *IP, options DecodeOptions)
+static op XchgAccumulator(parsing_context *Context, options DecodeOptions)
 {
+    u8 *IP = Context->IP;
     op Op = {OP_NAME_XCHG, IP, 2, 0};
     int Register = (IP[0] & 0b00000111);
     Op.Param[DESTINATION].Type = Param_Register;
@@ -998,8 +1080,9 @@ static op XchgAccumulator(u8 *IP, options DecodeOptions)
     return(Op);
 }
 
-static op InOut_FixedPort(u8 *IP, options DecodeOptions)
+static op InOut_FixedPort(parsing_context *Context, options DecodeOptions)
 {
+    u8 *IP = Context->IP;
     op Op = {DecodeOptions.NameIndex, IP, 2, 0};
     int Word = (IP[0] & 0b00000001);
 
@@ -1020,8 +1103,9 @@ static op InOut_FixedPort(u8 *IP, options DecodeOptions)
     return(Op);
 }
 
-static op InOut_VariablePort(u8 *IP, options DecodeOptions)
+static op InOut_VariablePort(parsing_context *Context, options DecodeOptions)
 {
+    u8 *IP = Context->IP;
     op Op = {DecodeOptions.NameIndex, IP, 2, 0};
     int Word = (IP[0] & 0b00000001);
 
@@ -1043,23 +1127,27 @@ static op InOut_VariablePort(u8 *IP, options DecodeOptions)
     return(Op);
 }
 
-static op LiteralBytes(u8 *IP, options DecodeOptions)
+static op LiteralBytes(parsing_context *Context, options DecodeOptions)
 {
+    u8 *IP = Context->IP;
     op Op = {DecodeOptions.NameIndex, IP, 0, 0};
     Op.ByteLength = DecodeOptions.ByteLength;
+    Op.Suffix = DecodeOptions.Suffix;
     return(Op);
 }
 
-static op Rep(u8 *IP, options DecodeOptions)
+static op Rep(parsing_context *Context, options DecodeOptions)
 {
+    u8 *IP = Context->IP;
     op Op = {DecodeOptions.NameIndex, IP, 0, 0};
     Op.RepeatWhileZero = (IP[0] & 1);
     Op.ByteLength = 1;
     return(Op);
 }
 
-static op CallDirectIntersegment(u8 *IP, options DecodeOptions)
+static op CallDirectIntersegment(parsing_context *Context, options DecodeOptions)
 {
+    u8 *IP = Context->IP;
     op Op = {DecodeOptions.NameIndex, IP, 1, 0};
     Op.Param[DESTINATION].Type = Param_DirectIntersegment;
     Op.Param[DESTINATION].IP = *(u16 *)&IP[1];
@@ -1068,10 +1156,47 @@ static op CallDirectIntersegment(u8 *IP, options DecodeOptions)
     return(Op);
 }
 
-static op CallJmp_IndirectWithinSegment(u8 *IP, options DecodeOptions)
+static op CallIndirectIntersegment(parsing_context *Context, options DecodeOptions)
 {
+    u8 *IP = Context->IP;
+    op Op = {DecodeOptions.NameIndex, IP, 1, 0};
+    Op.Param[DESTINATION].Type = Param_DirectIntersegment;
+    Op.Param[DESTINATION].IP = *(u16 *)&IP[1];
+    Op.Param[DESTINATION].CS = *(u16 *)&IP[3];
+    Op.ByteLength = 5;
+    return(Op);
+}
+
+static op JmpDirectWithinSegment(parsing_context *Context, options DecodeOptions)
+{
+    u8 *IP = Context->IP;
+    op Op = {DecodeOptions.NameIndex, IP, 1, 0};
+    Op.Word = 1;
+    Op.Param[DESTINATION].Type = Param_Immediate;
+    Op.ByteLength = 3;
+    int Offset = (int)(IP - Context->OpStream);
+    Op.Param[DESTINATION].ImmediateValue = Offset + *(s16 *)&IP[1] + Op.ByteLength;
+    return(Op);
+}
+
+static op JmpDirectIntersegment(parsing_context *Context, options DecodeOptions)
+{
+    u8 *IP = Context->IP;
+    op Op = {DecodeOptions.NameIndex, IP, 1, 0};
+    Op.Word = 1;
+    Op.Param[DESTINATION].Type = Param_Immediate;
+    Op.Param[DESTINATION].ImmediateValue = *(s16 *)&IP[1];
+    Op.ByteLength = 3;
+    Op.Suffix = 'f';
+    return(Op);
+}
+
+static op CallJmp_IndirectIntraOrInterSegment(parsing_context *Context, options DecodeOptions)
+{
+    u8 *IP = Context->IP;
     op Opp = {DecodeOptions.NameIndex, IP, 1, 0};
     SetOpConfig(&Opp);
+    Opp.IsFar = DecodeOptions.IsFar;
 
     op *Op = &Opp;
     if(Op->Mode == REGISTER_MODE_NO_DISPLACEMENT) // 0b11
@@ -1084,7 +1209,7 @@ static op CallJmp_IndirectWithinSegment(u8 *IP, options DecodeOptions)
         if(Op->RegB != 0x06)
         {
             SetParamToMem(IP + 2, Op, DESTINATION, Op->RegB, 0, 0, 0);
-            Op->ByteLength = Op->Word ? 4 : 3;
+            Op->ByteLength = 2;
         }
         else // NOTE(chuck): Direct address
         {
@@ -1103,8 +1228,9 @@ static op CallJmp_IndirectWithinSegment(u8 *IP, options DecodeOptions)
     return(Opp);
 }
 
-static op Ret(u8 *IP, options DecodeOptions)
+static op Ret(parsing_context *Context, options DecodeOptions)
 {
+    u8 *IP = Context->IP;
     op Op = {OP_NAME_RET, IP, 0, 0};
     Op.ByteLength = DecodeOptions.ByteLength;
     if(Op.ByteLength == 3)
@@ -1116,16 +1242,18 @@ static op Ret(u8 *IP, options DecodeOptions)
     return(Op);
 }
 
-static op Int(u8 *IP, options DecodeOptions)
+static op Int(parsing_context *Context, options DecodeOptions)
 {
+    u8 *IP = Context->IP;
     op Op = {OP_NAME_INT, IP, 1, 0};
     Op.ByteLength = 2;
     SetParamToImm(IP + 1, &Op, DESTINATION, (options){0});
     return(Op);
 }
 
-static op SegmentOverride(u8 *IP, options DecodeOptions)
+static op SegmentOverride(parsing_context *Context, options DecodeOptions)
 {
+    u8 *IP = Context->IP;
     op Op = {SEGMENT_OVERRIDE, IP, 0, 0};
     Op.SegmentOverride = (IP[0] & 0b00011000) >> 3;
     Op.ByteLength = 1;
@@ -1143,6 +1271,7 @@ static op_definition OpTable[] =
     {OP_NAME_MOV,    0b11111110, 0b11000110, 0, 0, MovImmediateToRegisterOrMemory, {0}},
     {OP_NAME_MOV,    0b11111110, 0b10100000, 0, 0, MovMemoryToAccumulator, {0}},
     {OP_NAME_MOV,    0b11111110, 0b10100010, 0, 0, MovAccumulatorToMemory, {0}},
+    {OP_NAME_MOV,    0b11111111, 0b10001100, 0, 0, MovSegmentRegisterToRegisterOrMemory, {0}},
 
     {OP_NAME_ADD,    0b11111100, 0b00000000, 0, 0,     AddSubCmp_RegisterOrMemoryWithRegisterToEither, {.NameIndex=OP_NAME_ADD, .ParamCount=2}},
     {OP_NAME_ADD,    0b11111000, 0b10000000, 1, 0b000, AddSubCmp_ImmediateWithRegisterOrMemory,        {.NameIndex=OP_NAME_ADD}},
@@ -1230,12 +1359,18 @@ static op_definition OpTable[] =
     {OP_NAME_CBW,    0b11111111, 0b10011000, 0, 0, LiteralBytes, {.NameIndex=OP_NAME_CBW, .ByteLength=1}},
     {OP_NAME_CWD,    0b11111111, 0b10011001, 0, 0, LiteralBytes, {.NameIndex=OP_NAME_CWD, .ByteLength=1}},
 
-    // {OP_NAME_CALL,   0b11111111, 0b11101000, 0, 0, AddSubCmp_RegisterOrMemoryWithRegisterToEither, {.NameIndex=OP_NAME_CALL, .ParamCount=1}},
-    {OP_NAME_CALL,   0b11111111, 0b11111111, 1, 0b010, CallJmp_IndirectWithinSegment, {.NameIndex=OP_NAME_CALL}},
+    {OP_NAME_CALL,   0b11111111, 0b11111111, 1, 0b010, CallJmp_IndirectIntraOrInterSegment, {.NameIndex=OP_NAME_CALL}},
     {OP_NAME_CALL,   0b11111111, 0b10011010, 0, 0, CallDirectIntersegment, {.NameIndex=OP_NAME_CALL}},
+    {OP_NAME_CALL,   0b11111111, 0b11111111, 1, 0b010, CallJmp_IndirectIntraOrInterSegment, {.NameIndex=OP_NAME_CALL}},
 
-    {OP_NAME_JMP,    0b11111111, 0b11111111, 1, 0b100, CallJmp_IndirectWithinSegment, {.NameIndex=OP_NAME_JMP}},
+    {OP_NAME_JMP,    0b11111111, 0b11111111, 1, 0b100, CallJmp_IndirectIntraOrInterSegment, {.NameIndex=OP_NAME_JMP}},
+    {OP_NAME_JMP,    0b11111111, 0b11111111, 1, 0b101, CallJmp_IndirectIntraOrInterSegment, {.NameIndex=OP_NAME_JMP, .IsFar=1}},
+    {OP_NAME_CALL,   0b11111111, 0b11111111, 1, 0b011, CallJmp_IndirectIntraOrInterSegment, {.NameIndex=OP_NAME_CALL, .IsFar=1}},
     {OP_NAME_JMP,    0b11111111, 0b11101010, 0, 0, CallDirectIntersegment, {.NameIndex=OP_NAME_JMP}},
+    {OP_NAME_JMP,    0b11111111, 0b11101001, 0, 0, JmpDirectWithinSegment, {.NameIndex=OP_NAME_JMP}},
+    {OP_NAME_CALL,   0b11111111, 0b11101000, 0, 0, JmpDirectWithinSegment, {.NameIndex=OP_NAME_CALL}},
+    {OP_NAME_RET,    0b11111111, 0b11001010, 0, 0, JmpDirectIntersegment,  {.NameIndex=OP_NAME_RET}},
+    {OP_NAME_RET,    0b11111111, 0b11001011, 0, 0, LiteralBytes, {.NameIndex=OP_NAME_RET, .ByteLength=1, .Suffix='f'}},
 
     {OP_NAME_RET,    0b11111111, 0b11000011, 0, 0, Ret, {.ByteLength=1}},
     {OP_NAME_RET,    0b11111111, 0b11000010, 0, 0, Ret, {.ByteLength=3}},
@@ -1424,11 +1559,11 @@ int main(int ArgCount, char **Args)
 
     printf("bits 16\n");
 
-    u8 *IP = OpStream;
     u8 *EndOfData = OpStream + ByteLength;
-    while(IP < EndOfData)
+    parsing_context Context = {OpStream, OpStream};
+    while(Context.IP < EndOfData)
     {
-        op Op = {0, IP, 0};
+        op Op = {0, Context.IP, 0};
 
         int OpTableLength = ArrayLength(OpTable);
         int OpTableIndex;
@@ -1438,25 +1573,25 @@ int main(int ArgCount, char **Args)
             ++OpTableIndex)
         {
             op_definition *OpDefinition = OpTable + OpTableIndex;
-            if((IP[0] & OpDefinition->PrefixMask) == OpDefinition->Prefix)
+            if((Context.IP[0] & OpDefinition->PrefixMask) == OpDefinition->Prefix)
             {
                 if(OpDefinition->UseExtension)
                 {
                     if(OpDefinition->UseExtension == 1)
                     {
-                        int OpCodeExtension = ((IP[1] & 0b00111000) >> 3);
+                        int OpCodeExtension = ((Context.IP[1] & 0b00111000) >> 3);
                         if(OpCodeExtension == OpDefinition->Extension)
                         {
-                            Op = OpDefinition->Decode(IP, OpDefinition->DecodeOptions);
+                            Op = OpDefinition->Decode(&Context, OpDefinition->DecodeOptions);
                             Found = 1;
                             break;
                         }
                     }
                     else if(OpDefinition->UseExtension == 2)
                     {
-                        if(IP[1] == OpDefinition->Extension)
+                        if(Context.IP[1] == OpDefinition->Extension)
                         {
-                            Op = OpDefinition->Decode(IP, OpDefinition->DecodeOptions);
+                            Op = OpDefinition->Decode(&Context, OpDefinition->DecodeOptions);
                             Found = 1;
                             break;
                         }
@@ -1464,7 +1599,7 @@ int main(int ArgCount, char **Args)
                 }
                 else
                 {
-                    Op = OpDefinition->Decode(IP, OpDefinition->DecodeOptions);
+                    Op = OpDefinition->Decode(&Context, OpDefinition->DecodeOptions);
                     Found = 1;
                     break;
                 }
@@ -1479,7 +1614,7 @@ int main(int ArgCount, char **Args)
         OpList[OpCount++] = Op;
 
         Assert(Op.ByteLength);
-        IP += Op.ByteLength;
+        Context.IP += Op.ByteLength;
     }
 
     // TODO(chuck): Rethink the jump targetting. This seems too complicated?
@@ -1560,12 +1695,16 @@ int main(int ArgCount, char **Args)
             else
             {
                 // TODO(chuck): This is fudgeville!
-                if(OpIndex > 0 && !IsPrefix(&OpList[OpIndex - 1]))
+                if((OpIndex == 0) || ((OpIndex > 0) && !IsPrefix(&OpList[OpIndex - 1])))
                 {
                     LinePointer += sprintf(LinePointer, "  ");
                 }
 
                 LinePointer += sprintf(LinePointer, "%s", OpNameLookup[Op->NameIndex]);
+                if(Op->Suffix)
+                {
+                    LinePointer += sprintf(LinePointer, "%c", Op->Suffix);
+                }
 
                 // TODO(chuck): This is fudgeville!
                 if((Op->NameIndex == OP_NAME_MOVS) ||
@@ -1619,6 +1758,11 @@ int main(int ArgCount, char **Args)
                 }
                 else
                 {
+                    if(Op->IsFar)
+                    {
+                        LinePointer += sprintf(LinePointer, "far ");
+                    }
+
                     // NOTE(chuck): Don't bother with tracking which side. Just blast it on the left.
                     if(Op->EmitSize)
                     {
