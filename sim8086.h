@@ -327,3 +327,10 @@ typedef struct
     op (*Decode)(parsing_context *Context, options Options);
     options DecodeOptions;
 } op_definition;
+
+typedef struct
+{
+    op *Op;
+    __int64 Offset;
+} jump;
+

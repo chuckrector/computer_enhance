@@ -1136,12 +1136,6 @@ static int PrintParam(char *OutputInit, op *Op, op_param *Param)
     return TotalBytesWritten;
 }
 
-typedef struct
-{
-    op *Op;
-    __int64 Offset;
-} jump;
-
 static int CompareJumps(const void *A, const void *B)
 {
     jump *AJump = (jump *)A;
