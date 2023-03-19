@@ -6,19 +6,6 @@ typedef short s16;
 #define Assert(Condition) if(!(Condition)) { __debugbreak(); }
 #define ArrayLength(A) (sizeof(A) / sizeof((A)[0]))
 
-#define TOP_6BITS 0xfc
-#define TOP_7BITS 0xfe
-
-#define ADD_REGISTER_OR_MEMORY_TO_REGISTER  0x00
-#define ADD_IMMEDIATE_TO_REGISTER_OR_MEMORY 0x80
-#define ADD_IMMEDIATE_TO_ACCUMULATOR        0x04
-
-#define MOV_REGISTER_OR_MEMORY_TO_REGISTER  0x88 // 0b100010 00
-#define MOV_IMMEDIATE_TO_REGISTER 0xb0 // 0b1011 0 000
-#define MOV_IMMEDIATE_TO_REGISTER_OR_MEMORY 0xc6 // 0b1100011 0
-#define MOV_MEMORY_TO_ACCUMULATOR 0xa0 // 0b1010000 0
-#define MOV_ACCUMULATOR_TO_MEMORY 0xa2 // 0b1010001 0
-
 #define MEMORY_MODE_MAYBE_NO_DISPLACEMENT 0x00
 #define MEMORY_MODE_8BIT_DISPLACEMENT     0x01
 #define MEMORY_MODE_16BIT_DISPLACEMENT    0x02
