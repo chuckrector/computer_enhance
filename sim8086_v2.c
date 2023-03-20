@@ -1,6 +1,5 @@
 #include <windows.h>
 #include <stdio.h>
-#include "sim8086_v2.h"
 
 typedef unsigned char u8;
 typedef unsigned short u16;
@@ -188,19 +187,16 @@ int main(int ArgCount, char **Args)
                 }
             }
 
-            Temp[0];
             sprintf(Temp, "%.*s", Flavor->FormatLength, Flavor->Format);
-            printf("%-40s ", Temp);
+            printf("%-40s; ", Temp);
 
-            Temp[0] = 0;
-            char *T = Temp;
             for(int ByteIndex = 0;
                 ByteIndex < Length;
                 ++ByteIndex)
             {
-                T += sprintf(T, "%02X ", P[ByteIndex]);
+                printf("%02X ", P[ByteIndex]);
             }
-            printf("; %s\n", Temp);
+            printf("\n");
 
             P += Length;
         }
