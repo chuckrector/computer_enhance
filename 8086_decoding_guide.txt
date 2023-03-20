@@ -62,7 +62,7 @@ HEX| BINARY    | 2ND BYTE    | BYTES 3, 4, 5, 6                | FORMAT
 34 | 0011 0100 | DATA-8      |                                 | XOR AL,IMMED8
 35 | 0011 0101 | DATA-LO     | DATA-HI                         | XOR AX,IMMED16
 36 | 0011 0110 |             |                                 | SS: (segment override prefix)
-37 | 0011 0110 |             |                                 | AAA
+37 | 0011 0111 |             |                                 | AAA
 38 | 0011 1000 | MOD REG R/M | DISP-LO,DISP-HI                 | CMP REG8/MEM8,REG8
 39 | 0011 1001 | MOD REG R/M | DISP-LO,DISP-HI                 | CMP REG16/MEM16,REG16
 3A | 0011 1010 | MOD REG R/M | DISP-LO,DISP-HI                 | CMP REG8,REG8/MEM8
@@ -175,11 +175,23 @@ HEX| BINARY    | 2ND BYTE    | BYTES 3, 4, 5, 6                | FORMAT
 89 | 1000 1001 | MOD REG R/M | DISP-LO,DISP-HI                 | MOV REG16/MEM16/REG16
 8A | 1000 1010 | MOD REG R/M | DISP-LO,DISP-HI                 | MOV REG8,REG8/MEM8
 8B | 1000 1011 | MOD REG R/M | DISP-LO,DISP-HI                 | MOV REG16,REG16/MEM16
-8C | 1000 1100 | MOD 0SR R/M | DISP-LO,DISP-HI                 | MOV REG16/MEM16,SEGREG
-8C | 1000 1100 | MOD 1-- R/M |                                 | (not used)
+8C | 1000 1100 | MOD 000 R/M | DISP-LO,DISP-HI                 | MOV REG16/MEM16,SEGREG
+8C | 1000 1100 | MOD 001 R/M | DISP-LO,DISP-HI                 | MOV REG16/MEM16,SEGREG
+8C | 1000 1100 | MOD 010 R/M | DISP-LO,DISP-HI                 | MOV REG16/MEM16,SEGREG
+8C | 1000 1100 | MOD 011 R/M | DISP-LO,DISP-HI                 | MOV REG16/MEM16,SEGREG
+8C | 1000 1100 | MOD 100 R/M |                                 | (not used)
+8C | 1000 1100 | MOD 101 R/M |                                 | (not used)
+8C | 1000 1100 | MOD 110 R/M |                                 | (not used)
+8C | 1000 1100 | MOD 111 R/M |                                 | (not used)
 8D | 1000 1101 | MOD REG R/M | DISP-LO,DISP-HI                 | LEA REG16,MEM16
-8E | 1000 1110 | MOD 0SR R/M | DISP-LO,DISP-HI                 | MOV SEGREG,REG16/MEM16
-8E | 1000 1110 | MOD 1-- R/M |                                 | (not used)
+8E | 1000 1110 | MOD 000 R/M | DISP-LO,DISP-HI                 | MOV SEGREG,REG16/MEM16
+8E | 1000 1110 | MOD 001 R/M | DISP-LO,DISP-HI                 | MOV SEGREG,REG16/MEM16
+8E | 1000 1110 | MOD 010 R/M | DISP-LO,DISP-HI                 | MOV SEGREG,REG16/MEM16
+8E | 1000 1110 | MOD 011 R/M | DISP-LO,DISP-HI                 | MOV SEGREG,REG16/MEM16
+8E | 1000 1110 | MOD 100 R/M |                                 | (not used)
+8E | 1000 1110 | MOD 101 R/M |                                 | (not used)
+8E | 1000 1110 | MOD 110 R/M |                                 | (not used)
+8E | 1000 1110 | MOD 111 R/M |                                 | (not used)
 8F | 1000 1111 | MOD 000 R/M | DISP-LO,DISP-HI                 | POP REG16/MEM16
 8F | 1000 1111 | MOD 001 R/M |                                 | (not used)
 8F | 1000 1111 | MOD 010 R/M |                                 | (not used)
@@ -223,7 +235,7 @@ AF | 1010 1111 |             |                                 | SCAS DEST-STR16
 B0 | 1011 0000 | DATA-8      |                                 | MOV AL,IMMED8
 B1 | 1011 0001 | DATA-8      |                                 | MOV CL,IMMED8
 B2 | 1011 0010 | DATA-8      |                                 | MOV DL,IMMED8
-B3 | 1011 1011 | DATA-8      |                                 | MOV BL,IMMED8
+B3 | 1011 0011 | DATA-8      |                                 | MOV BL,IMMED8
 B4 | 1011 0100 | DATA-8      |                                 | MOV AH,IMMED8
 B5 | 1011 0101 | DATA-8      |                                 | MOV CH,IMMED8
 B6 | 1011 0110 | DATA-8      |                                 | MOV DH,IMMED8
@@ -303,12 +315,68 @@ D5 | 1101 0101 | 0000 1010   |                                 | AAD
 D6 | 1101 0110 |             |                                 | (not used)
 D7 | 1101 0111 |             |                                 | XLAT SOURCE-TABLE
 D8 | 1101 1000 | MOD 000 R/M | DISP-LO,DISP-HI                 | ESC OPCODE,SOURCE
-D8 | 1101 1001 | MOD 001 R/M | DISP-LO,DISP-HI                 | ESC OPCODE,SOURCE
-D8 | 1101 1010 | MOD 010 R/M | DISP-LO,DISP-HI                 | ESC OPCODE,SOURCE
-D8 | 1101 1011 | MOD 011 R/M | DISP-LO,DISP-HI                 | ESC OPCODE,SOURCE
-D8 | 1101 1100 | MOD 100 R/M | DISP-LO,DISP-HI                 | ESC OPCODE,SOURCE
-D8 | 1101 1101 | MOD 101 R/M | DISP-LO,DISP-HI                 | ESC OPCODE,SOURCE
-D8 | 1101 1110 | MOD 110 R/M | DISP-LO,DISP-HI                 | ESC OPCODE,SOURCE
+D8 | 1101 1000 | MOD 001 R/M | DISP-LO,DISP-HI                 | ESC OPCODE,SOURCE
+D8 | 1101 1000 | MOD 010 R/M | DISP-LO,DISP-HI                 | ESC OPCODE,SOURCE
+D8 | 1101 1000 | MOD 011 R/M | DISP-LO,DISP-HI                 | ESC OPCODE,SOURCE
+D8 | 1101 1000 | MOD 100 R/M | DISP-LO,DISP-HI                 | ESC OPCODE,SOURCE
+D8 | 1101 1000 | MOD 101 R/M | DISP-LO,DISP-HI                 | ESC OPCODE,SOURCE
+D8 | 1101 1000 | MOD 110 R/M | DISP-LO,DISP-HI                 | ESC OPCODE,SOURCE
+D8 | 1101 1000 | MOD 111 R/M | DISP-LO,DISP-HI                 | ESC OPCODE,SOURCE
+D9 | 1101 1001 | MOD 000 R/M | DISP-LO,DISP-HI                 | ESC OPCODE,SOURCE
+D9 | 1101 1001 | MOD 001 R/M | DISP-LO,DISP-HI                 | ESC OPCODE,SOURCE
+D9 | 1101 1001 | MOD 010 R/M | DISP-LO,DISP-HI                 | ESC OPCODE,SOURCE
+D9 | 1101 1001 | MOD 011 R/M | DISP-LO,DISP-HI                 | ESC OPCODE,SOURCE
+D9 | 1101 1001 | MOD 100 R/M | DISP-LO,DISP-HI                 | ESC OPCODE,SOURCE
+D9 | 1101 1001 | MOD 101 R/M | DISP-LO,DISP-HI                 | ESC OPCODE,SOURCE
+D9 | 1101 1001 | MOD 110 R/M | DISP-LO,DISP-HI                 | ESC OPCODE,SOURCE
+D9 | 1101 1001 | MOD 111 R/M | DISP-LO,DISP-HI                 | ESC OPCODE,SOURCE
+DA | 1101 1010 | MOD 000 R/M | DISP-LO,DISP-HI                 | ESC OPCODE,SOURCE
+DA | 1101 1010 | MOD 001 R/M | DISP-LO,DISP-HI                 | ESC OPCODE,SOURCE
+DA | 1101 1010 | MOD 010 R/M | DISP-LO,DISP-HI                 | ESC OPCODE,SOURCE
+DA | 1101 1010 | MOD 011 R/M | DISP-LO,DISP-HI                 | ESC OPCODE,SOURCE
+DA | 1101 1010 | MOD 100 R/M | DISP-LO,DISP-HI                 | ESC OPCODE,SOURCE
+DA | 1101 1010 | MOD 101 R/M | DISP-LO,DISP-HI                 | ESC OPCODE,SOURCE
+DA | 1101 1010 | MOD 110 R/M | DISP-LO,DISP-HI                 | ESC OPCODE,SOURCE
+DA | 1101 1010 | MOD 111 R/M | DISP-LO,DISP-HI                 | ESC OPCODE,SOURCE
+DB | 1101 1011 | MOD 000 R/M | DISP-LO,DISP-HI                 | ESC OPCODE,SOURCE
+DB | 1101 1011 | MOD 001 R/M | DISP-LO,DISP-HI                 | ESC OPCODE,SOURCE
+DB | 1101 1011 | MOD 010 R/M | DISP-LO,DISP-HI                 | ESC OPCODE,SOURCE
+DB | 1101 1011 | MOD 011 R/M | DISP-LO,DISP-HI                 | ESC OPCODE,SOURCE
+DB | 1101 1011 | MOD 100 R/M | DISP-LO,DISP-HI                 | ESC OPCODE,SOURCE
+DB | 1101 1011 | MOD 101 R/M | DISP-LO,DISP-HI                 | ESC OPCODE,SOURCE
+DB | 1101 1011 | MOD 110 R/M | DISP-LO,DISP-HI                 | ESC OPCODE,SOURCE
+DB | 1101 1011 | MOD 111 R/M | DISP-LO,DISP-HI                 | ESC OPCODE,SOURCE
+DC | 1101 1100 | MOD 000 R/M | DISP-LO,DISP-HI                 | ESC OPCODE,SOURCE
+DC | 1101 1100 | MOD 001 R/M | DISP-LO,DISP-HI                 | ESC OPCODE,SOURCE
+DC | 1101 1100 | MOD 010 R/M | DISP-LO,DISP-HI                 | ESC OPCODE,SOURCE
+DC | 1101 1100 | MOD 011 R/M | DISP-LO,DISP-HI                 | ESC OPCODE,SOURCE
+DC | 1101 1100 | MOD 100 R/M | DISP-LO,DISP-HI                 | ESC OPCODE,SOURCE
+DC | 1101 1100 | MOD 101 R/M | DISP-LO,DISP-HI                 | ESC OPCODE,SOURCE
+DC | 1101 1100 | MOD 110 R/M | DISP-LO,DISP-HI                 | ESC OPCODE,SOURCE
+DC | 1101 1100 | MOD 111 R/M | DISP-LO,DISP-HI                 | ESC OPCODE,SOURCE
+DD | 1101 1101 | MOD 000 R/M | DISP-LO,DISP-HI                 | ESC OPCODE,SOURCE
+DD | 1101 1101 | MOD 001 R/M | DISP-LO,DISP-HI                 | ESC OPCODE,SOURCE
+DD | 1101 1101 | MOD 010 R/M | DISP-LO,DISP-HI                 | ESC OPCODE,SOURCE
+DD | 1101 1101 | MOD 011 R/M | DISP-LO,DISP-HI                 | ESC OPCODE,SOURCE
+DD | 1101 1101 | MOD 100 R/M | DISP-LO,DISP-HI                 | ESC OPCODE,SOURCE
+DD | 1101 1101 | MOD 101 R/M | DISP-LO,DISP-HI                 | ESC OPCODE,SOURCE
+DD | 1101 1101 | MOD 110 R/M | DISP-LO,DISP-HI                 | ESC OPCODE,SOURCE
+DD | 1101 1101 | MOD 111 R/M | DISP-LO,DISP-HI                 | ESC OPCODE,SOURCE
+DE | 1101 1110 | MOD 000 R/M | DISP-LO,DISP-HI                 | ESC OPCODE,SOURCE
+DE | 1101 1110 | MOD 001 R/M | DISP-LO,DISP-HI                 | ESC OPCODE,SOURCE
+DE | 1101 1110 | MOD 010 R/M | DISP-LO,DISP-HI                 | ESC OPCODE,SOURCE
+DE | 1101 1110 | MOD 011 R/M | DISP-LO,DISP-HI                 | ESC OPCODE,SOURCE
+DE | 1101 1110 | MOD 100 R/M | DISP-LO,DISP-HI                 | ESC OPCODE,SOURCE
+DE | 1101 1110 | MOD 101 R/M | DISP-LO,DISP-HI                 | ESC OPCODE,SOURCE
+DE | 1101 1110 | MOD 110 R/M | DISP-LO,DISP-HI                 | ESC OPCODE,SOURCE
+DE | 1101 1110 | MOD 111 R/M | DISP-LO,DISP-HI                 | ESC OPCODE,SOURCE
+DF | 1101 1111 | MOD 000 R/M | DISP-LO,DISP-HI                 | ESC OPCODE,SOURCE
+DF | 1101 1111 | MOD 001 R/M | DISP-LO,DISP-HI                 | ESC OPCODE,SOURCE
+DF | 1101 1111 | MOD 010 R/M | DISP-LO,DISP-HI                 | ESC OPCODE,SOURCE
+DF | 1101 1111 | MOD 011 R/M | DISP-LO,DISP-HI                 | ESC OPCODE,SOURCE
+DF | 1101 1111 | MOD 100 R/M | DISP-LO,DISP-HI                 | ESC OPCODE,SOURCE
+DF | 1101 1111 | MOD 101 R/M | DISP-LO,DISP-HI                 | ESC OPCODE,SOURCE
+DF | 1101 1111 | MOD 110 R/M | DISP-LO,DISP-HI                 | ESC OPCODE,SOURCE
 DF | 1101 1111 | MOD 111 R/M | DISP-LO,DISP-HI                 | ESC OPCODE,SOURCE
 E0 | 1110 0000 | IP-INC-8    |                                 | LOOPNE/LOOPNZ SHORT-LABEL
 E1 | 1110 0001 | IP-INC-8    |                                 | LOOPE/LOOPZ SHORT-LABEL
