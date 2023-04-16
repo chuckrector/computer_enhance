@@ -15,7 +15,7 @@ call cl %CompilerFlags% ..\sim8086.c /link %LinkerFlags%
 
 @REM call nasm ..\all.asm -o %~dp0build\all
 
-@REM for %%f in (..\perfaware\part1\*.asm) do (
-@REM     call nasm ..\perfaware\part1\%%~nf.asm -o %~dp0build\%%~nf
-@REM )
+for %%f in (..\perfaware\part1\*.asm) do (
+    call nasm ..\perfaware\part1\%%~nf.asm -o %~dp0build\%%~nf
+)
 

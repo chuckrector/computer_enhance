@@ -272,6 +272,7 @@ static void SharedImmediateToRegister(parsing_context *Context, op *Op, int Regi
     Op->ByteLength = Op->Word ? 3 : 2;
 }
 
+
 static op MovImmediateToRegister(parsing_context *Context, options DecodeOptions)
 {
     u8 *IP = Context->IP;
@@ -412,6 +413,57 @@ static op MovSegmentRegisterToRegisterOrMemory(parsing_context *Context, options
 
     Op->Param[SOURCE].Type = Param_SegmentRegister;
     Op->Param[SOURCE].RegisterOrMemoryIndex = Op->SegmentRegister;
+
+    return(Opp);
+}
+
+static op MovRegisterOrMemoryToSegmentRegister(parsing_context *Context, options DecodeOptions)
+{
+    u8 *IP = Context->IP;
+    op Opp = {OP_NAME_MOV, IP, 2, 0};
+    SetOpConfig(&Opp);
+    Opp.Word = 1;
+
+    options Options = {0};
+    op *Op = &Opp;
+    int MaybeSignExtendAndWord = 0;
+    if(Options.NoSignExtension)
+    {
+        MaybeSignExtendAndWord = Op->Word;
+    }
+    else
+    {
+        MaybeSignExtendAndWord = (Options.SignExtend == 0) && Op->Word;
+    }
+
+    if(Op->Mode == REGISTER_MODE_NO_DISPLACEMENT)
+    {
+        SetParamToReg(IP + 2, Op, SOURCE, GetRegisterIndex(Op->RegB, Op->Word));
+        Op->ByteLength = 2;
+    }
+    else if(Op->Mode == MEMORY_MODE_MAYBE_NO_DISPLACEMENT)
+    {
+        if(Op->RegB != 0x06)
+        {
+            SetParamToMem(IP + 2, Op, SOURCE, Op->RegB, 0, 0, 0);
+            Op->ByteLength = 2;
+        }
+        else
+        {
+            SetParamToMemDirectAddress(IP + 2, Op, SOURCE, Op->Word);
+            Op->ByteLength = 4;
+        }
+    }
+    else if((Op->Mode == MEMORY_MODE_8BIT_DISPLACEMENT) ||
+            (Op->Mode == MEMORY_MODE_16BIT_DISPLACEMENT))
+    {
+        int WordDisplacement = (Op->Mode == MEMORY_MODE_16BIT_DISPLACEMENT);
+        SetParamToMem(IP + 2, Op, SOURCE, Op->RegB, 1, WordDisplacement, 1);
+        Op->ByteLength = WordDisplacement ? 4 : 3;
+    }
+
+    Op->Param[DESTINATION].Type = Param_SegmentRegister;
+    Op->Param[DESTINATION].RegisterOrMemoryIndex = Op->SegmentRegister;
 
     return(Opp);
 }
@@ -885,6 +937,7 @@ static op_definition OpTable[] =
     {OP_NAME_MOV,    0b11111110, 0b10100000, 0, 0, MovMemoryToAccumulator, {0}},
     {OP_NAME_MOV,    0b11111110, 0b10100010, 0, 0, MovAccumulatorToMemory, {0}},
     {OP_NAME_MOV,    0b11111111, 0b10001100, 0, 0, MovSegmentRegisterToRegisterOrMemory, {0}},
+    {OP_NAME_MOV,    0b11111111, 0b10001110, 0, 0, MovRegisterOrMemoryToSegmentRegister, {0}},
 
     {OP_NAME_ADD,    0b11111100, 0b00000000, 0, 0,     AddSubCmp_RegisterOrMemoryWithRegisterToEither, {.NameIndex=OP_NAME_ADD, .ParamCount=2}},
     {OP_NAME_ADD,    0b11111000, 0b10000000, 1, 0b000, AddSubCmp_ImmediateWithRegisterOrMemory,        {.NameIndex=OP_NAME_ADD}},
@@ -1161,6 +1214,14 @@ int main(int ArgCount, char **Args)
     int HitError = 0;
 
     char *Filename = Args[1];
+
+    int Exec = 0;
+    if(!strcmp(Args[1], "-exec"))
+    {
+        Exec = 1;
+        Filename = Args[2];
+    }
+
     FILE *File = fopen(Filename, "rb");
     size_t ByteLength = fread(OpStream, 1, ArrayLength(OpStream), File);
 
