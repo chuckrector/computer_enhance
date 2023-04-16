@@ -1518,36 +1518,90 @@ int main(int ArgCount, char **Args)
 
                     char Exec[1024] = {0};
                     char *E = Exec;
-                    if((Op->ParamCount == 2) &&
-                       (Op->Param[SOURCE].Type == Param_Immediate) &&
-                       (Op->Param[DESTINATION].Type == Param_Register))
+                    if((Op->ParamCount == 2))
                     {
-                        op_param *Source = &Op->Param[SOURCE];
-                        op_param *Dest   = &Op->Param[DESTINATION];
-                        E += PrintParam(E, Op, Dest);
+                        int ValueBefore = -1;
+                        int DestRegisterIndex = -1;
 
-                        int ValueBefore = CPUState.Registers[Dest->RegisterOrMemoryIndex];
-                        int RegisterIndex = Dest->RegisterOrMemoryIndex;
-                        if(RegisterIndex < 8)
+                        if((Op->Param[SOURCE].Type == Param_Immediate) &&
+                           (Op->Param[DESTINATION].Type == Param_Register))
                         {
-                            if(RegisterIndex < 4)
+                            op_param *Source = &Op->Param[SOURCE];
+                            op_param *Dest   = &Op->Param[DESTINATION];
+                            E += PrintParam(E, Op, Dest);
+
+                            ValueBefore = CPUState.Registers[Dest->RegisterOrMemoryIndex];
+                            DestRegisterIndex = Dest->RegisterOrMemoryIndex;
+                            if(DestRegisterIndex < 8)
                             {
-                                CPUState.Registers[RegisterIndex] &= ~0xff;
-                                CPUState.Registers[RegisterIndex] |= (Source->ImmediateValue & 0xff);
+                                if(DestRegisterIndex < 4)
+                                {
+                                    CPUState.Registers[DestRegisterIndex] &= ~0xff;
+                                    CPUState.Registers[DestRegisterIndex] |= (Source->ImmediateValue & 0xff);
+                                }
+                                else
+                                {
+                                    CPUState.Registers[DestRegisterIndex] &= ~0xff00;
+                                    CPUState.Registers[DestRegisterIndex] |= ((Source->ImmediateValue & 0xff) << 8);
+                                }
                             }
                             else
                             {
-                                CPUState.Registers[RegisterIndex] &= ~0xff00;
-                                CPUState.Registers[RegisterIndex] |= ((Source->ImmediateValue & 0xff) << 8);
+                                DestRegisterIndex -= 8;
+                                CPUState.Registers[DestRegisterIndex] = (Source->ImmediateValue & 0xffff);
                             }
                         }
-                        else
+                        else if((Op->Param[SOURCE].Type == Param_Register) &&
+                                (Op->Param[DESTINATION].Type == Param_Register))
                         {
-                            RegisterIndex -= 8;
-                            CPUState.Registers[RegisterIndex] = (Source->ImmediateValue & 0xffff);
+                            op_param *Source = &Op->Param[SOURCE];
+                            op_param *Dest   = &Op->Param[DESTINATION];
+                            E += PrintParam(E, Op, Dest);
+
+                            ValueBefore = CPUState.Registers[Dest->RegisterOrMemoryIndex];
+                            DestRegisterIndex = Dest->RegisterOrMemoryIndex;
+                            int SourceRegisterIndex = Source->RegisterOrMemoryIndex;
+                            int SourceValue = 0;
+
+                            if(SourceRegisterIndex < 8)
+                            {
+                                if(SourceRegisterIndex < 4)
+                                {
+                                    SourceValue = CPUState.Registers[SourceRegisterIndex] & 0xff;
+                                }
+                                else
+                                {
+                                    SourceValue = (CPUState.Registers[SourceRegisterIndex] & 0xff00) >> 8;
+                                }
+                            }
+                            else
+                            {
+                                SourceValue = CPUState.Registers[SourceRegisterIndex - 8] & 0xffff;
+                            }
+
+                            if(DestRegisterIndex < 8)
+                            {
+                                if(DestRegisterIndex < 4)
+                                {
+                                    CPUState.Registers[DestRegisterIndex] &= ~0xff;
+                                    CPUState.Registers[DestRegisterIndex] |= (SourceValue & 0xff);
+                                }
+                                else
+                                {
+                                    CPUState.Registers[DestRegisterIndex] &= ~0xff00;
+                                    CPUState.Registers[DestRegisterIndex] |= ((SourceValue & 0xff) << 8);
+                                }
+                            }
+                            else
+                            {
+                                DestRegisterIndex -= 8;
+                                CPUState.Registers[DestRegisterIndex] = (SourceValue & 0xffff);
+                            }
                         }
-                        E += sprintf(E, ":0x%04X->0x%04X", ValueBefore, CPUState.Registers[RegisterIndex]);
+
+                        E += sprintf(E, ":0x%04X->0x%04X", ValueBefore, CPUState.Registers[DestRegisterIndex]);
                     }
+
                     printf("%s", Exec);
                 }
 
@@ -1559,12 +1613,14 @@ int main(int ArgCount, char **Args)
     if(Exec)
     {
         printf("\nFinal registers:\n");
+        int DisplayOrder[8] = {0, 3, 1, 2, 4, 5, 6, 7};
         for(int RegisterIndex = 0;
             RegisterIndex < 8;
             ++RegisterIndex)
         {
-            u16 Value = CPUState.Registers[RegisterIndex];
-            printf("      %s: 0x%04X (%d)\n", RegisterLookup[8 + RegisterIndex], Value, Value);
+            int DisplayRegisterIndex = DisplayOrder[RegisterIndex];
+            u16 Value = CPUState.Registers[DisplayRegisterIndex];
+            printf("      %s: 0x%04X (%d)\n", RegisterLookup[8 + DisplayRegisterIndex], Value, Value);
         }
     }
 
