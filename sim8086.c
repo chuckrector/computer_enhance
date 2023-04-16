@@ -5,11 +5,13 @@
 static u8 OpStream[1024*4];
 static op OpList[1024*4];
 static int OpCount;
+static char Temp[1024] = {0};
 
 typedef struct
 {
     u16 Registers[8];
     u16 SegmentRegisters[4];
+    u16 Flags;
 } cpu_state;
 static cpu_state CPUState;
 
@@ -763,9 +765,9 @@ static op InOut_FixedPort(parsing_context *Context, options DecodeOptions)
     int B = SOURCE;
     if(DecodeOptions.SwapParams)
     {
-        int Temp = A;
+        int Save = A;
         A = B;
-        B = Temp;
+        B = Save;
     }
 
     Op.Param[A].Type = Param_Register;
@@ -786,9 +788,9 @@ static op InOut_VariablePort(parsing_context *Context, options DecodeOptions)
     int B = SOURCE;
     if(DecodeOptions.SwapParams)
     {
-        int Temp = A;
+        int Save = A;
         A = B;
-        B = Temp;
+        B = Save;
     }
 
     Op.Param[A].Type = Param_Register;
@@ -1215,6 +1217,116 @@ static int CompareJumps(const void *A, const void *B)
     return(Result);
 }
 
+static int PrintFlags(char *Buffer, int Flags)
+{
+    char *P = Buffer;
+    if(Flags == 0)
+    {
+        P += sprintf(P, "(none)");
+    }
+    else
+    {
+        if(Flags & FLAG_CARRY)
+        {
+            P += sprintf(P, "C");
+        }
+        if(Flags & FLAG_PARITY)
+        {
+            P += sprintf(P, "P");
+        }
+        if(Flags & FLAG_AUX_CARRY)
+        {
+            P += sprintf(P, "A");
+        }
+        if(Flags & FLAG_ZERO)
+        {
+            P += sprintf(P, "Z");
+        }
+        if(Flags & FLAG_SIGN)
+        {
+            P += sprintf(P, "S");
+        }
+        if(Flags & FLAG_TRAP)
+        {
+            P += sprintf(P, "T");
+        }
+        if(Flags & FLAG_INTERRUPT)
+        {
+            P += sprintf(P, "I");
+        }
+        if(Flags & FLAG_DIRECTION)
+        {
+            P += sprintf(P, "D");
+        }
+        if(Flags & FLAG_OVERFLOW)
+        {
+            P += sprintf(P, "O");
+        }
+    }
+    int Result = (int)(P - Buffer);
+    return(Result);
+}
+
+static void PrintBinary(u16 Value)
+{
+    for(int BitIndex = 0;
+        BitIndex < 16;
+        ++BitIndex)
+    {
+        if(Value & (15 - (1 << BitIndex)))
+        {
+            printf("1");
+        }
+        else
+        {
+            printf("0");
+        }
+    }
+}
+
+static u16 SetFlags(u16 Flags, u16 Value)
+{
+    int BitSetCount = 0;
+    int V = Value & 0xff;
+    while(V)
+    {
+        if(V & 1)
+        {
+            ++BitSetCount;
+        }
+        V >>= 1;
+    }
+
+    if(Value == 0)
+    {
+        Flags |= FLAG_ZERO;
+    }
+    else
+    {
+        Flags &= ~FLAG_ZERO;
+    }
+
+    if((BitSetCount & 1) == 0)
+    {
+        Flags |= FLAG_PARITY;
+    }
+    else
+    {
+        Flags &= ~FLAG_PARITY;
+    }
+
+    if(Value & 0x8000)
+    {
+        Flags |= FLAG_SIGN;
+    }
+    else
+    {
+        Flags &= ~FLAG_SIGN;
+    }
+
+    return(Flags);
+}
+
 int main(int ArgCount, char **Args)
 {
     int Result = 0;
@@ -1500,24 +1612,25 @@ int main(int ArgCount, char **Args)
                     int OpBytesLength = ArrayLength(OpBytes);
                     Assert(EmitLength < OpBytesLength);
                 }
-                printf("; 0x%08llX:%s", (IP - OpStream), OpBytes);
+                sprintf(Temp, "; 0x%08llX:%s", (IP - OpStream), OpBytes);
+                printf("%-30s", Temp);
 
                 if(Exec)
                 {
-                    printf("  [exec] ");
-
                     char Exec[1024] = {0};
                     char *E = Exec;
-                    if((Op->ParamCount == 2))
+                    E += sprintf(E, "  [exec] ");
+
+                    op_param *Source = 0;
+                    op_param *Dest = 0;
+                    char *DestName = 0;
+                    u16 FlagsBefore = CPUState.Flags;
+
+                    u16 SourceValue = 0xcccc;
+                    if(Op->ParamCount >= SOURCE)
                     {
-                        op_param *Source = &Op->Param[SOURCE];
-                        op_param *Dest   = &Op->Param[DESTINATION];
-                        char *DestRegisterName = "<unknown>";
-                        u16 SourceValue = 0xcccc;
-                        u16 DestValueAfter = 0xcccc;
-                        u16 DestValueBefore = 0xcccc;
-                        int DestRegisterIndex = 0xcccc;
-                        
+                        Source = &Op->Param[SOURCE];
+
                         if(Source->Type == Param_Immediate)
                         {
                             SourceValue = (u16)Source->ImmediateValue;
@@ -1544,7 +1657,14 @@ int main(int ArgCount, char **Args)
                         {
                             SourceValue = CPUState.SegmentRegisters[Source->RegisterOrMemoryIndex];
                         }
-                        
+                    }
+
+                    u16 DestValue = 0xcccc;
+                    if(Op->ParamCount >= DESTINATION)
+                    {
+                        Dest = &Op->Param[DESTINATION];
+
+                        int DestRegisterIndex = 0xcccc;
                         if(Dest->Type == Param_Register)
                         {
                             int DestRegisterIndex = Dest->RegisterOrMemoryIndex;
@@ -1553,8 +1673,43 @@ int main(int ArgCount, char **Args)
                             {
                                 if(DestRegisterIndex < 4)
                                 {
-                                    DestValueBefore = CPUState.Registers[DestRegisterIndex];
-                                    DestRegisterName = RegisterLookup[8 + DestRegisterIndex];
+                                    DestValue = CPUState.Registers[DestRegisterIndex];
+                                    DestName  = RegisterLookup[8 + DestRegisterIndex];
+                                }
+                                else
+                                {
+                                    DestRegisterIndex -= 4;
+                                    DestValue = CPUState.Registers[DestRegisterIndex];
+                                    DestName  = RegisterLookup[8 + DestRegisterIndex];
+                                }
+                            }
+                            else
+                            {
+                                DestName = RegisterLookup[DestRegisterIndex];
+                                DestRegisterIndex -= 8;
+                                DestValue = CPUState.Registers[DestRegisterIndex];
+                            }
+                        }
+                        else if(Dest->Type == Param_SegmentRegister)
+                        {
+                            DestName  = SegmentRegisterLookup[Dest->RegisterOrMemoryIndex];
+                            DestValue = CPUState.SegmentRegisters[Dest->RegisterOrMemoryIndex];
+                        }
+                    }
+
+                    if(Op->NameIndex == OP_NAME_MOV)
+                    {
+                        u16 DestValueAfter  = 0xcccc;
+                        u16 DestValueBefore = DestValue;
+
+                        if(Dest->Type == Param_Register)
+                        {
+                            int DestRegisterIndex = Dest->RegisterOrMemoryIndex;
+                            if(DestRegisterIndex < 8)
+                            {
+                                if(DestRegisterIndex < 4)
+                                {
+                                    DestName = RegisterLookup[8 + DestRegisterIndex];
                                     u16 NewValue  = (CPUState.Registers[DestRegisterIndex] & 0xff00);
                                         NewValue |= (SourceValue & 0xff);
                                     CPUState.Registers[DestRegisterIndex] = NewValue;
@@ -1562,8 +1717,7 @@ int main(int ArgCount, char **Args)
                                 else
                                 {
                                     DestRegisterIndex -= 4;
-                                    DestValueBefore = CPUState.Registers[DestRegisterIndex];
-                                    DestRegisterName = RegisterLookup[8 + DestRegisterIndex];
+                                    DestName = RegisterLookup[8 + DestRegisterIndex];
                                     u16 NewValue  = (CPUState.Registers[DestRegisterIndex] & 0x00ff);
                                         NewValue |= ((SourceValue & 0xff) << 8);
                                     CPUState.Registers[DestRegisterIndex] = NewValue;
@@ -1571,9 +1725,8 @@ int main(int ArgCount, char **Args)
                             }
                             else
                             {
-                                DestRegisterName = RegisterLookup[DestRegisterIndex];
+                                DestName = RegisterLookup[DestRegisterIndex];
                                 DestRegisterIndex -= 8;
-                                DestValueBefore = CPUState.Registers[DestRegisterIndex];
                                 CPUState.Registers[DestRegisterIndex] = (SourceValue & 0xffff);
                             }
 
@@ -1581,12 +1734,103 @@ int main(int ArgCount, char **Args)
                         }
                         else if(Dest->Type == Param_SegmentRegister)
                         {
-                            DestRegisterName = SegmentRegisterLookup[Dest->RegisterOrMemoryIndex];
-                            DestValueBefore = CPUState.SegmentRegisters[Dest->RegisterOrMemoryIndex];
-                            DestValueAfter  = CPUState.SegmentRegisters[Dest->RegisterOrMemoryIndex] = (SourceValue & 0xffff);
+                            DestName = SegmentRegisterLookup[Dest->RegisterOrMemoryIndex];
+                            DestValueAfter = CPUState.SegmentRegisters[Dest->RegisterOrMemoryIndex] = (SourceValue & 0xffff);
                         }
 
-                        E += sprintf(E, "%s:0x%04X->0x%04X", DestRegisterName, DestValueBefore, DestValueAfter);
+                        E += sprintf(E, "%s:0x%04X->0x%04X", DestName, DestValueBefore, DestValueAfter);
+                    }
+                    else if((Op->NameIndex == OP_NAME_SUB) ||
+                            (Op->NameIndex == OP_NAME_CMP) ||
+                            (Op->NameIndex == OP_NAME_ADD))
+                    {
+                        int IsAdd = (Op->NameIndex == OP_NAME_ADD);
+                        int IsSub = (Op->NameIndex == OP_NAME_SUB);
+                        int IsCmp = (Op->NameIndex == OP_NAME_CMP);
+                        u16 DestValueBefore = DestValue;
+                        u16 ComputedValue = 0xcccc;
+                        u16 *DestRegister = 0;
+
+                        if(Dest->Type == Param_Register)
+                        {
+                            int DestRegisterIndex = Dest->RegisterOrMemoryIndex;
+                            if(DestRegisterIndex < 8)
+                            {
+                                if(DestRegisterIndex < 4)
+                                {
+                                    DestName = RegisterLookup[8 + DestRegisterIndex];
+                                    DestRegister = &CPUState.Registers[DestRegisterIndex];
+                                    ComputedValue = *DestRegister;
+                                    if(IsAdd)
+                                    {
+                                        ComputedValue += (SourceValue & 0xff);
+                                    }
+                                    else
+                                    {
+                                        ComputedValue -= (SourceValue & 0xff);
+                                    }
+                                }
+                                else
+                                {
+                                    DestRegisterIndex -= 4;
+                                    DestName = RegisterLookup[8 + DestRegisterIndex];
+                                    DestRegister = &CPUState.Registers[DestRegisterIndex];
+                                    ComputedValue = *DestRegister;
+                                    if(IsAdd)
+                                    {
+                                        ComputedValue += ((SourceValue & 0xff) << 8);
+                                    }
+                                    else
+                                    {
+                                        ComputedValue -= ((SourceValue & 0xff) << 8);
+                                    }
+                                }
+                            }
+                            else
+                            {
+                                DestName = RegisterLookup[DestRegisterIndex];
+                                DestRegisterIndex -= 8;
+                                DestRegister = &CPUState.Registers[DestRegisterIndex];
+                                ComputedValue = *DestRegister;
+                                if(IsAdd)
+                                {
+                                    ComputedValue += (SourceValue & 0xffff);
+                                }
+                                else
+                                {
+                                    ComputedValue -= (SourceValue & 0xffff);
+                                }
+                            }
+                        }
+                        else if(Dest->Type == Param_SegmentRegister)
+                        {
+                            DestName = SegmentRegisterLookup[Dest->RegisterOrMemoryIndex];
+                            DestRegister = &CPUState.SegmentRegisters[Dest->RegisterOrMemoryIndex];
+                            ComputedValue = *DestRegister;
+                            if(IsAdd)
+                            {
+                                ComputedValue += SourceValue;
+                            }
+                            else
+                            {
+                                ComputedValue -= SourceValue;
+                            }
+                        }
+
+                        if(!IsCmp)
+                        {
+                            *DestRegister = ComputedValue;
+                            E += sprintf(E, "%s:0x%04X->0x%04X ", DestName, DestValueBefore, ComputedValue);
+                        }
+
+                        CPUState.Flags = SetFlags(FlagsBefore, ComputedValue);
+                        if(CPUState.Flags != FlagsBefore)
+                        {
+                            E += sprintf(E, "flags: ");
+                            E += PrintFlags(E, FlagsBefore);
+                            E += sprintf(E, "->");
+                            E += PrintFlags(E, CPUState.Flags);
+                        }
                     }
 
                     printf("%s", Exec);
@@ -1618,6 +1862,11 @@ int main(int ArgCount, char **Args)
             u16 Value = CPUState.SegmentRegisters[SegmentRegisterIndex];
             printf("      %s: 0x%04X (%d)\n", SegmentRegisterLookup[SegmentRegisterIndex], Value, Value);
         }
+
+        char *T = Temp;
+        T += sprintf(T, "   flags: ");
+        T += PrintFlags(T, CPUState.Flags);
+        printf("%s\n", Temp);
     }
 
     return(Result);

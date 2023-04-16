@@ -11,6 +11,16 @@ typedef short s16;
 #define MEMORY_MODE_16BIT_DISPLACEMENT    0x02
 #define REGISTER_MODE_NO_DISPLACEMENT     0x03
 
+#define FLAG_CARRY     (1 << 0)
+#define FLAG_PARITY    (1 << 2)
+#define FLAG_AUX_CARRY (1 << 4)
+#define FLAG_ZERO      (1 << 6)
+#define FLAG_SIGN      (1 << 7)
+#define FLAG_TRAP      (1 << 8)
+#define FLAG_INTERRUPT (1 << 9)
+#define FLAG_DIRECTION (1 << 10)
+#define FLAG_OVERFLOW  (1 << 11)
+
 #define REGISTER_NAME_AL 0
 #define REGISTER_NAME_CL 1
 #define REGISTER_NAME_DL 2
