@@ -22,7 +22,7 @@ HEX| BINARY    | 2ND BYTE    | BYTES 3, 4, 5, 6                | FORMAT
 0C | 0000 1100 | DATA-8      |                                 | OR AL,IMMED8
 0D | 0000 1101 | DATA-LO     | DATA-HI                         | OR AX,IMMED16
 0E | 0000 1110 |             |                                 | PUSH CS
-0F | 0000 1111 |             |                                 | (not used)
+0F | 0000 1111 |             |                                 | ; not used
 10 | 0001 0000 | MOD REG R/M | DISP-LO,DISP-HI                 | ADC REG8/MEM8,REG8
 11 | 0001 0001 | MOD REG R/M | DISP-LO,DISP-HI                 | ADC REG16/MEM16,REG16
 12 | 0001 0010 | MOD REG R/M | DISP-LO,DISP-HI                 | ADC REG8,REG8/MEM8
@@ -37,15 +37,15 @@ HEX| BINARY    | 2ND BYTE    | BYTES 3, 4, 5, 6                | FORMAT
 1B | 0001 1011 | MOD REG R/M | DISP-LO,DISP-HI                 | SBB REG16,REG16/MEM16
 1C | 0001 1100 | DATA-8      |                                 | SBB AL,IMMED8
 1D | 0001 1101 | DATA-LO     | DATA-HI                         | SBB AX,IMMED16
-1E | 0001 1110 |             |                                 | PUSH OS
-1F | 0001 1111 |             |                                 | POP OS
+1E | 0001 1110 |             |                                 | PUSH DS
+1F | 0001 1111 |             |                                 | POP DS
 20 | 0010 0000 | MOD REG R/M | DISP-LO,DISP-HI                 | AND REG8/MEM8,REG8
 21 | 0010 0001 | MOD REG R/M | DISP-LO,DISP-HI                 | AND REG16/MEM16,REG16
 22 | 0010 0010 | MOD REG R/M | DISP-LO,DISP-HI                 | AND REG8,REG8/MEM8
 23 | 0010 0011 | MOD REG R/M | DISP-LO,DISP-HI                 | AND REG16,REG16/MEM16
 24 | 0010 0100 | DATA-8      |                                 | AND AL,IMMED8
 25 | 0010 0101 | DATA-LO     | DATA-HI                         | AND AX,IMMED16
-26 | 0010 0110 |             |                                 | ES: (segment override prefix)
+26 | 0010 0110 |             |                                 | ES:+
 27 | 0010 0111 |             |                                 | DAA
 28 | 0010 1000 | MOD REG R/M | DISP-LO,DISP-HI                 | SUB REG8/MEM8,REG8
 29 | 0010 1001 | MOD REG R/M | DISP-LO,DISP-HI                 | SUB REG16/MEM16,REG16
@@ -53,7 +53,7 @@ HEX| BINARY    | 2ND BYTE    | BYTES 3, 4, 5, 6                | FORMAT
 2B | 0010 1011 | MOD REG R/M | DISP-LO,DISP-HI                 | SUB REG16,REG16/MEM16
 2C | 0010 1100 | DATA-8      |                                 | SUB AL,IMMED8
 2D | 0010 1101 | DATA-LO     | DATA-HI                         | SUB AX,IMMED16
-2E | 0010 1110 |             |                                 | CS: (segment override prefix)
+2E | 0010 1110 |             |                                 | CS:+
 2F | 0010 1111 |             |                                 | DAS
 30 | 0011 0000 | MOD REG R/M | DISP-LO,DISP-HI                 | XOR REG8/MEM8,REG8
 31 | 0011 0001 | MOD REG R/M | DISP-LO,DISP-HI                 | XOR REG16/MEM16,REG16
@@ -61,7 +61,7 @@ HEX| BINARY    | 2ND BYTE    | BYTES 3, 4, 5, 6                | FORMAT
 33 | 0011 0011 | MOD REG R/M | DISP-LO,DISP-HI                 | XOR REG16,REG16/MEM16
 34 | 0011 0100 | DATA-8      |                                 | XOR AL,IMMED8
 35 | 0011 0101 | DATA-LO     | DATA-HI                         | XOR AX,IMMED16
-36 | 0011 0110 |             |                                 | SS: (segment override prefix)
+36 | 0011 0110 |             |                                 | SS:+
 37 | 0011 0111 |             |                                 | AAA
 38 | 0011 1000 | MOD REG R/M | DISP-LO,DISP-HI                 | CMP REG8/MEM8,REG8
 39 | 0011 1001 | MOD REG R/M | DISP-LO,DISP-HI                 | CMP REG16/MEM16,REG16
@@ -69,7 +69,7 @@ HEX| BINARY    | 2ND BYTE    | BYTES 3, 4, 5, 6                | FORMAT
 3B | 0011 1011 | MOD REG R/M | DISP-LO,DISP-HI                 | CMP REG16,REG16/MEM16
 3C | 0011 1100 | DATA-8      |                                 | CMP AL,IMMED8
 3D | 0011 1101 | DATA-LO     | DATA-HI                         | CMP AX,IMMED16
-3E | 0011 1110 |             |                                 | DS: (segment override prefix)
+3E | 0011 1110 |             |                                 | DS:+
 3F | 0011 1111 |             |                                 | AAS
 40 | 0100 0000 |             |                                 | INC AX
 41 | 0100 0001 |             |                                 | INC CX
@@ -103,22 +103,22 @@ HEX| BINARY    | 2ND BYTE    | BYTES 3, 4, 5, 6                | FORMAT
 5D | 0101 1101 |             |                                 | POP BP
 5E | 0101 1110 |             |                                 | POP SI
 5F | 0101 1111 |             |                                 | POP DI
-60 | 0110 0000 |             |                                 | (not used)
-61 | 0110 0001 |             |                                 | (not used)
-62 | 0110 0010 |             |                                 | (not used)
-63 | 0110 0011 |             |                                 | (not used)
-64 | 0110 0100 |             |                                 | (not used)
-65 | 0110 0101 |             |                                 | (not used)
-66 | 0110 0110 |             |                                 | (not used)
-67 | 0110 0111 |             |                                 | (not used)
-68 | 0110 1000 |             |                                 | (not used)
-69 | 0110 1001 |             |                                 | (not used)
-6A | 0110 1010 |             |                                 | (not used)
-6B | 0110 1011 |             |                                 | (not used)
-6C | 0110 1100 |             |                                 | (not used)
-6D | 0110 1101 |             |                                 | (not used)
-6E | 0110 1110 |             |                                 | (not used)
-6F | 0110 1111 |             |                                 | (not used)
+60 | 0110 0000 |             |                                 | ; not used
+61 | 0110 0001 |             |                                 | ; not used POPA?
+62 | 0110 0010 |             |                                 | ; not used
+63 | 0110 0011 |             |                                 | ; not used
+64 | 0110 0100 |             |                                 | ; not used
+65 | 0110 0101 |             |                                 | ; not used
+66 | 0110 0110 |             |                                 | ; not used
+67 | 0110 0111 |             |                                 | ; not used
+68 | 0110 1000 |             |                                 | ; not used
+69 | 0110 1001 |             |                                 | ; not used
+6A | 0110 1010 |             |                                 | ; not used
+6B | 0110 1011 |             |                                 | ; not used
+6C | 0110 1100 |             |                                 | ; not used
+6D | 0110 1101 |             |                                 | ; not used
+6E | 0110 1110 |             |                                 | ; not used
+6F | 0110 1111 |             |                                 | ; not used
 70 | 0111 0000 | IP-INC8     |                                 | JO SHORT-LABEL
 71 | 0111 0001 | IP-INC8     |                                 | JNO SHORT-LABEL
 72 | 0111 0010 | IP-INC8     |                                 | JB/JNAE/JC SHORT-LABEL
@@ -152,55 +152,55 @@ HEX| BINARY    | 2ND BYTE    | BYTES 3, 4, 5, 6                | FORMAT
 81 | 1000 0001 | MOD 110 R/M | DISP-LO,DISP-HI,DATA-LO,DATA-HI | XOR REG16/MEM16,IMMED16
 81 | 1000 0001 | MOD 111 R/M | DISP-LO,DISP-HI,DATA-LO,DATA-HI | CMP REG16/MEM16,IMMED16
 82 | 1000 0010 | MOD 000 R/M | DISP-LO,DISP-HI,DATA-8          | ADD REG8/MEM8,IMMED8
-82 | 1000 0010 | MOD 001 R/M |                                 | (not used)
+82 | 1000 0010 | MOD 001 R/M |                                 | ; not used
 82 | 1000 0010 | MOD 010 R/M | DISP-LO,DISP-HI,DATA-8          | ADC REG8/MEM8,IMMED8
 82 | 1000 0010 | MOD 011 R/M | DISP-LO,DISP-HI,DATA-8          | SBB REG8/MEM8,IMMED8
-82 | 1000 0010 | MOD 100 R/M |                                 | (not used)
+82 | 1000 0010 | MOD 100 R/M |                                 | ; not used
 82 | 1000 0010 | MOD 101 R/M | DISP-LO,DISP-HI,DATA-8          | SUB REG8/MEM8,IMMED8
-82 | 1000 0010 | MOD 110 R/M |                                 | (not used)
+82 | 1000 0010 | MOD 110 R/M |                                 | ; not used
 82 | 1000 0010 | MOD 111 R/M | DISP-LO,DISP-HI,DATA-8          | CMP REG8/MEM8,IMMED8
 83 | 1000 0011 | MOD 000 R/M | DISP-LO,DISP-HI,DATA-SX         | ADD REG16/MEM16,IMMED8
-83 | 1000 0011 | MOD 001 R/M |                                 | (not used)
+83 | 1000 0011 | MOD 001 R/M |                                 | ; not used
 83 | 1000 0011 | MOD 010 R/M | DISP-LO,DISP-HI,DATA-SX         | ADC REG16/MEM16,IMMED8
 83 | 1000 0011 | MOD 011 R/M | DISP-LO,DISP-HI,DATA-SX         | SBB REG16/MEM16,IMMED8
-83 | 1000 0011 | MOD 100 R/M |                                 | (not used)
+83 | 1000 0011 | MOD 100 R/M |                                 | ; not used
 83 | 1000 0011 | MOD 101 R/M | DISP-LO,DISP-HI,DATA-SX         | SUB REG16/MEM16,IMMED8
-83 | 1000 0011 | MOD 110 R/M |                                 | (not used)
+83 | 1000 0011 | MOD 110 R/M |                                 | ; not used
 83 | 1000 0011 | MOD 111 R/M | DISP-LO,DISP-HI,DATA-SX         | CMP REG16/MEM16,IMMED8
 84 | 1000 0100 | MOD REG R/M | DISP-LO,DISP-HI                 | TEST REG8/MEM8,REG8
 85 | 1000 0101 | MOD REG R/M | DISP-LO,DISP-HI                 | TEST REG16/MEM16,REG16
 86 | 1000 0110 | MOD REG R/M | DISP-LO,DISP-HI                 | XCHG REG8,REG8/MEM8
 87 | 1000 0111 | MOD REG R/M | DISP-LO,DISP-HI                 | XCHG REG16,REG16/MEM16
 88 | 1000 1000 | MOD REG R/M | DISP-LO,DISP-HI                 | MOV REG8/MEM8,REG8
-89 | 1000 1001 | MOD REG R/M | DISP-LO,DISP-HI                 | MOV REG16/MEM16/REG16
+89 | 1000 1001 | MOD REG R/M | DISP-LO,DISP-HI                 | MOV REG16/MEM16,REG16
 8A | 1000 1010 | MOD REG R/M | DISP-LO,DISP-HI                 | MOV REG8,REG8/MEM8
 8B | 1000 1011 | MOD REG R/M | DISP-LO,DISP-HI                 | MOV REG16,REG16/MEM16
 8C | 1000 1100 | MOD 000 R/M | DISP-LO,DISP-HI                 | MOV REG16/MEM16,SEGREG
 8C | 1000 1100 | MOD 001 R/M | DISP-LO,DISP-HI                 | MOV REG16/MEM16,SEGREG
 8C | 1000 1100 | MOD 010 R/M | DISP-LO,DISP-HI                 | MOV REG16/MEM16,SEGREG
 8C | 1000 1100 | MOD 011 R/M | DISP-LO,DISP-HI                 | MOV REG16/MEM16,SEGREG
-8C | 1000 1100 | MOD 100 R/M |                                 | (not used)
-8C | 1000 1100 | MOD 101 R/M |                                 | (not used)
-8C | 1000 1100 | MOD 110 R/M |                                 | (not used)
-8C | 1000 1100 | MOD 111 R/M |                                 | (not used)
+8C | 1000 1100 | MOD 100 R/M |                                 | ; not used
+8C | 1000 1100 | MOD 101 R/M |                                 | ; not used
+8C | 1000 1100 | MOD 110 R/M |                                 | ; not used
+8C | 1000 1100 | MOD 111 R/M |                                 | ; not used
 8D | 1000 1101 | MOD REG R/M | DISP-LO,DISP-HI                 | LEA REG16,MEM16
 8E | 1000 1110 | MOD 000 R/M | DISP-LO,DISP-HI                 | MOV SEGREG,REG16/MEM16
 8E | 1000 1110 | MOD 001 R/M | DISP-LO,DISP-HI                 | MOV SEGREG,REG16/MEM16
 8E | 1000 1110 | MOD 010 R/M | DISP-LO,DISP-HI                 | MOV SEGREG,REG16/MEM16
 8E | 1000 1110 | MOD 011 R/M | DISP-LO,DISP-HI                 | MOV SEGREG,REG16/MEM16
-8E | 1000 1110 | MOD 100 R/M |                                 | (not used)
-8E | 1000 1110 | MOD 101 R/M |                                 | (not used)
-8E | 1000 1110 | MOD 110 R/M |                                 | (not used)
-8E | 1000 1110 | MOD 111 R/M |                                 | (not used)
+8E | 1000 1110 | MOD 100 R/M |                                 | ; not used
+8E | 1000 1110 | MOD 101 R/M |                                 | ; not used
+8E | 1000 1110 | MOD 110 R/M |                                 | ; not used
+8E | 1000 1110 | MOD 111 R/M |                                 | ; not used
 8F | 1000 1111 | MOD 000 R/M | DISP-LO,DISP-HI                 | POP REG16/MEM16
-8F | 1000 1111 | MOD 001 R/M |                                 | (not used)
-8F | 1000 1111 | MOD 010 R/M |                                 | (not used)
-8F | 1000 1111 | MOD 011 R/M |                                 | (not used)
-8F | 1000 1111 | MOD 100 R/M |                                 | (not used)
-8F | 1000 1111 | MOD 101 R/M |                                 | (not used)
-8F | 1000 1111 | MOD 110 R/M |                                 | (not used)
-8F | 1000 1111 | MOD 111 R/M |                                 | (not used)
-90 | 1001 0000 |             |                                 | NOP (exchange AX,AX)
+8F | 1000 1111 | MOD 001 R/M |                                 | ; not used
+8F | 1000 1111 | MOD 010 R/M |                                 | ; not used
+8F | 1000 1111 | MOD 011 R/M |                                 | ; not used
+8F | 1000 1111 | MOD 100 R/M |                                 | ; not used
+8F | 1000 1111 | MOD 101 R/M |                                 | ; not used
+8F | 1000 1111 | MOD 110 R/M |                                 | ; not used
+8F | 1000 1111 | MOD 111 R/M |                                 | ; not used
+90 | 1001 0000 |             |                                 | NOP
 91 | 1001 0001 |             |                                 | XCHG AX,CX
 92 | 1001 0010 |             |                                 | XCHG AX,DX
 93 | 1001 0011 |             |                                 | XCHG AX,BX
@@ -219,19 +219,19 @@ HEX| BINARY    | 2ND BYTE    | BYTES 3, 4, 5, 6                | FORMAT
 A0 | 1010 0000 | ADDR-LO     | ADDR-HI                         | MOV AL,MEM8
 A1 | 1010 0001 | ADDR-LO     | ADDR-HI                         | MOV AX,MEM16
 A2 | 1010 0010 | ADDR-LO     | ADDR-HI                         | MOV MEM8,AL
-A3 | 1010 0011 | ADDR-LO     | ADDR-HI                         | MOV MEM16,AL
-A4 | 1010 0100 |             |                                 | MOVS DEST-STR8,SRC-STR8
-A5 | 1010 0101 |             |                                 | MOVS DEST-STR16,SRC-STR16
-A6 | 1010 0110 |             |                                 | CMPS DEST-STR8,SRC-STR8
-A7 | 1010 0111 |             |                                 | CMPS DEST-STR16,SRC-STR16
+A3 | 1010 0011 | ADDR-LO     | ADDR-HI                         | MOV MEM16,AX
+A4 | 1010 0100 |             |                                 | MOVSB
+A5 | 1010 0101 |             |                                 | MOVSW
+A6 | 1010 0110 |             |                                 | CMPSB
+A7 | 1010 0111 |             |                                 | CMPSW
 A8 | 1010 1000 | DATA-8      |                                 | TEST AL,IMMED8
 A9 | 1010 1001 | DATA-LO     | DATA-HI                         | TEST AX,IMMED16
-AA | 1010 1010 |             |                                 | STOS DEST-STR8
-AB | 1010 1011 |             |                                 | STOS DEST-STR16
-AC | 1010 1100 |             |                                 | LODS SRC-STR8
-AD | 1010 1101 |             |                                 | LODS SRC-STR16
-AE | 1010 1110 |             |                                 | SCAS DEST-STR8
-AF | 1010 1111 |             |                                 | SCAS DEST-STR16
+AA | 1010 1010 |             |                                 | STOSB
+AB | 1010 1011 |             |                                 | STOSW
+AC | 1010 1100 |             |                                 | LODSB
+AD | 1010 1101 |             |                                 | LODSW
+AE | 1010 1110 |             |                                 | SCASB
+AF | 1010 1111 |             |                                 | SCASW
 B0 | 1011 0000 | DATA-8      |                                 | MOV AL,IMMED8
 B1 | 1011 0001 | DATA-8      |                                 | MOV CL,IMMED8
 B2 | 1011 0010 | DATA-8      |                                 | MOV DL,IMMED8
@@ -248,33 +248,33 @@ BC | 1011 1100 | DATA-LO     | DATA-HI                         | MOV SP,IMMED16
 BD | 1011 1101 | DATA-LO     | DATA-HI                         | MOV BP,IMMED16
 BE | 1011 1110 | DATA-LO     | DATA-HI                         | MOV SI,IMMED16
 BF | 1011 1111 | DATA-LO     | DATA-HI                         | MOV DI,IMMED16
-C0 | 1100 0000 |             |                                 | (not used)
-C1 | 1100 0001 |             |                                 | (not used)
-C2 | 1100 0010 | DATA-LO     | DATA-HI                         | RET IMMED16 (intraseg)
-C3 | 1100 0011 |             |                                 | RET (intrasegment)
+C0 | 1100 0000 |             |                                 | ; not used
+C1 | 1100 0001 |             |                                 | ; not used
+C2 | 1100 0010 | DATA-LO     | DATA-HI                         | RET IMMED16 ; intrasegment
+C3 | 1100 0011 |             |                                 | RET ; intrasegment
 C4 | 1100 0100 | MOD REG R/M | DISP-LO,DISP-HI                 | LES REG16,MEM16
 C5 | 1100 0101 | MOD REG R/M | DISP-LO,DISP-HI                 | LDS REG16,MEM16
 C6 | 1100 0110 | MOD 000 R/M | DISP-LO,DISP-HI,DATA-8          | MOV MEM8,IMMED8
-C6 | 1100 0110 | MOD 001 R/M |                                 | (not used)
-C6 | 1100 0110 | MOD 010 R/M |                                 | (not used)
-C6 | 1100 0110 | MOD 011 R/M |                                 | (not used)
-C6 | 1100 0110 | MOD 100 R/M |                                 | (not used)
-C6 | 1100 0110 | MOD 101 R/M |                                 | (not used)
-C6 | 1100 0110 | MOD 110 R/M |                                 | (not used)
-C6 | 1100 0110 | MOD 111 R/M |                                 | (not used)
+C6 | 1100 0110 | MOD 001 R/M |                                 | ; not used
+C6 | 1100 0110 | MOD 010 R/M |                                 | ; not used
+C6 | 1100 0110 | MOD 011 R/M |                                 | ; not used
+C6 | 1100 0110 | MOD 100 R/M |                                 | ; not used
+C6 | 1100 0110 | MOD 101 R/M |                                 | ; not used
+C6 | 1100 0110 | MOD 110 R/M |                                 | ; not used
+C6 | 1100 0110 | MOD 111 R/M |                                 | ; not used
 C7 | 1100 0111 | MOD 000 R/M | DISP-LO,DISP-HI,DATA-LO,DATA-HI | MOV MEM16,IMMED16
-C7 | 1100 0111 | MOD 001 R/M |                                 | (not used)
-C7 | 1100 0111 | MOD 010 R/M |                                 | (not used)
-C7 | 1100 0111 | MOD 011 R/M |                                 | (not used)
-C7 | 1100 0111 | MOD 100 R/M |                                 | (not used)
-C7 | 1100 0111 | MOD 101 R/M |                                 | (not used)
-C7 | 1100 0111 | MOD 110 R/M |                                 | (not used)
-C7 | 1100 0111 | MOD 111 R/M |                                 | (not used)
-C8 | 1100 1000 |             |                                 | (not used)
-C9 | 1100 1001 |             |                                 | (not used)
-CA | 1100 1010 | DATA-LO     | DATA-HI                         | RET IMMED16 (intersegment)
-CB | 1100 1011 |             |                                 | RET (intersegment)
-CC | 1100 1100 |             |                                 | INT 3
+C7 | 1100 0111 | MOD 001 R/M |                                 | ; not used
+C7 | 1100 0111 | MOD 010 R/M |                                 | ; not used
+C7 | 1100 0111 | MOD 011 R/M |                                 | ; not used
+C7 | 1100 0111 | MOD 100 R/M |                                 | ; not used
+C7 | 1100 0111 | MOD 101 R/M |                                 | ; not used
+C7 | 1100 0111 | MOD 110 R/M |                                 | ; not used
+C7 | 1100 0111 | MOD 111 R/M |                                 | ; not used
+C8 | 1100 1000 |             |                                 | ; not used
+C9 | 1100 1001 |             |                                 | ; not used
+CA | 1100 1010 | DATA-LO     | DATA-HI                         | RETF IMMED16 ; intersegment
+CB | 1100 1011 |             |                                 | RETF ; intersegment
+CC | 1100 1100 |             |                                 | INT3
 CD | 1100 1101 | DATA-8      |                                 | INT IMMED8
 CE | 1100 1110 |             |                                 | INTO
 CF | 1100 1111 |             |                                 | IRET
@@ -284,7 +284,7 @@ D0 | 1101 0000 | MOD 010 R/M | DISP-LO,DISP-HI                 | RCL REG8/MEM8,1
 D0 | 1101 0000 | MOD 011 R/M | DISP-LO,DISP-HI                 | RCR REG8/MEM8,1
 D0 | 1101 0000 | MOD 100 R/M | DISP-LO,DISP-HI                 | SAL/SHL REG8/MEM8,1
 D0 | 1101 0000 | MOD 101 R/M | DISP-LO,DISP-HI                 | SHR REG8/MEM8,1
-D0 | 1101 0000 | MOD 110 R/M |                                 | (not used)
+D0 | 1101 0000 | MOD 110 R/M |                                 | ; not used
 D0 | 1101 0000 | MOD 111 R/M | DISP-LO,DISP-HI                 | SAR REG8/MEM8,1
 D1 | 1101 0001 | MOD 000 R/M | DISP-LO,DISP-HI                 | ROL REG16/MEM16,1
 D1 | 1101 0001 | MOD 001 R/M | DISP-LO,DISP-HI                 | ROR REG16/MEM16,1
@@ -292,7 +292,7 @@ D1 | 1101 0001 | MOD 010 R/M | DISP-LO,DISP-HI                 | RCL REG16/MEM16
 D1 | 1101 0001 | MOD 011 R/M | DISP-LO,DISP-HI                 | RCR REG16/MEM16,1
 D1 | 1101 0001 | MOD 100 R/M | DISP-LO,DISP-HI                 | SAL/SHL REG16/MEM16,1
 D1 | 1101 0001 | MOD 101 R/M | DISP-LO,DISP-HI                 | SHR REG16/MEM16,1
-D1 | 1101 0001 | MOD 110 R/M |                                 | (not used)
+D1 | 1101 0001 | MOD 110 R/M |                                 | ; not used
 D1 | 1101 0001 | MOD 111 R/M | DISP-LO,DISP-HI                 | SAR REG16/MEM16,1
 D2 | 1101 0010 | MOD 000 R/M | DISP-LO,DISP-HI                 | ROL REG8/MEM8,CL
 D2 | 1101 0010 | MOD 001 R/M | DISP-LO,DISP-HI                 | ROR REG8/MEM8,CL
@@ -300,7 +300,7 @@ D2 | 1101 0010 | MOD 010 R/M | DISP-LO,DISP-HI                 | RCL REG8/MEM8,C
 D2 | 1101 0010 | MOD 011 R/M | DISP-LO,DISP-HI                 | RCR REG8/MEM8,CL
 D2 | 1101 0010 | MOD 100 R/M | DISP-LO,DISP-HI                 | SAL/SHL REG8/MEM8,CL
 D2 | 1101 0010 | MOD 101 R/M | DISP-LO,DISP-HI                 | SHR REG81 MEM8,CL
-D2 | 1101 0010 | MOD 110 R/M |                                 | (not used)
+D2 | 1101 0010 | MOD 110 R/M |                                 | ; not used
 D2 | 1101 0010 | MOD 111 R/M | DISP-LO,DISP-HI                 | SAR REG8/MEM8,CL
 D3 | 1101 0011 | MOD 000 R/M | DISP-LO,DISP-HI                 | ROL REG16/MEM16,CL
 D3 | 1101 0011 | MOD 001 R/M | DISP-LO,DISP-HI                 | ROR REG16/MEM16,CL
@@ -308,12 +308,12 @@ D3 | 1101 0011 | MOD 010 R/M | DISP-LO,DISP-HI                 | RCL REG16/MEM16
 D3 | 1101 0011 | MOD 011 R/M | DISP-LO,DISP-HI                 | RCR REG16/MEM16,CL
 D3 | 1101 0011 | MOD 100 R/M | DISP-LO,DISP-HI                 | SAL/SHL REG16/MEM16,CL
 D3 | 1101 0011 | MOD 101 R/M | DISP-LO,DISP-HI                 | SHR REG16/MEM16,CL
-D3 | 1101 0011 | MOD 110 R/M |                                 | (not used)
+D3 | 1101 0011 | MOD 110 R/M |                                 | ; not used
 D3 | 1101 0011 | MOD 111 R/M | DISP-LO,DISP-HI                 | SAR REG16/MEM16,CL
 D4 | 1101 0100 | 0000 1010   |                                 | AAM
 D5 | 1101 0101 | 0000 1010   |                                 | AAD
-D6 | 1101 0110 |             |                                 | (not used)
-D7 | 1101 0111 |             |                                 | XLAT SOURCE-TABLE
+D6 | 1101 0110 |             |                                 | ; not used
+D7 | 1101 0111 |             |                                 | XLAT
 D8 | 1101 1000 | MOD 000 R/M | DISP-LO,DISP-HI                 | ESC OPCODE,SOURCE
 D8 | 1101 1000 | MOD 001 R/M | DISP-LO,DISP-HI                 | ESC OPCODE,SOURCE
 D8 | 1101 1000 | MOD 010 R/M | DISP-LO,DISP-HI                 | ESC OPCODE,SOURCE
@@ -384,24 +384,24 @@ E2 | 1110 0010 | IP-INC-8    |                                 | LOOP SHORT-LABE
 E3 | 1110 0011 | IP-INC-8    |                                 | JCXZ SHORT-LABEL
 E4 | 1110 0100 | DATA-8      |                                 | IN AL,IMMED8
 E5 | 1110 0101 | DATA-8      |                                 | IN AX,IMMED8
-E6 | 1110 0110 | DATA-8      |                                 | OUT AL,IMMED8
-E7 | 1110 0111 | DATA-8      |                                 | OUT AX,IMMED8
+E6 | 1110 0110 | DATA-8      |                                 | OUT IMMED8,AL
+E7 | 1110 0111 | DATA-8      |                                 | OUT IMMED8,AX
 E8 | 1110 1000 | IP-INC-LO   | IP-INC-HI                       | CALL NEAR-PROC
 E9 | 1110 1001 | IP-INC-LO   | IP-INC-HI                       | JMP NEAR-LABEL
 EA | 1110 1010 | IP-LO       | IP-HI,CS-LO,CS-HI               | JMP FAR-LABEL
 EB | 1110 1011 | IP-INC8     |                                 | JMP SHORT-LABEL
 EC | 1110 1100 |             |                                 | IN AL,DX
 ED | 1110 1101 |             |                                 | IN AX,DX
-EE | 1110 1110 |             |                                 | OUT AL,DX
-EF | 1110 1111 |             |                                 | OUT AX,DX
-F0 | 1111 0000 |             |                                 | LOCK (prefix)
-F1 | 1111 0001 |             |                                 | (not used)
+EE | 1110 1110 |             |                                 | OUT DX,AL
+EF | 1110 1111 |             |                                 | OUT DX,AX
+F0 | 1111 0000 |             |                                 | LOCK+
+F1 | 1111 0001 |             |                                 | ; not used
 F2 | 1111 0010 |             |                                 | REPNE/REPNZ
 F3 | 1111 0011 |             |                                 | REP/REPE/REPZ
 F4 | 1111 0100 |             |                                 | HLT
 F5 | 1111 0101 |             |                                 | CMC
 F6 | 1111 0110 | MOD 000 R/M | DISP-LO,DISP-HI,DATA-8          | TEST REG8/MEM8,IMMED8
-F6 | 1111 0110 | MOD 001 R/M |                                 | (not used)
+F6 | 1111 0110 | MOD 001 R/M |                                 | ; not used
 F6 | 1111 0110 | MOD 010 R/M | DISP-LO,DISP-HI                 | NOT REG8/MEM8
 F6 | 1111 0110 | MOD 011 R/M | DISP-LO,DISP-HI                 | NEG REG8/MEM8
 F6 | 1111 0110 | MOD 100 R/M | DISP-LO,DISP-HI                 | MUL REG8/MEM8
@@ -409,7 +409,7 @@ F6 | 1111 0110 | MOD 101 R/M | DISP-LO,DISP-HI                 | IMUL REG8/MEM8
 F6 | 1111 0110 | MOD 110 R/M | DISP-LO,DISP-HI                 | DIV REG8/MEM8
 F6 | 1111 0110 | MOD 111 R/M | DISP-LO,DISP-HI                 | IDIV REG8/MEM8
 F7 | 1111 0111 | MOD 000 R/M | DISP-LO,DISP-HI,DATA-LO,DATA-HI | TEST REG16/MEM16,IMMED16
-F7 | 1111 0111 | MOD 001 R/M |                                 | (not used)
+F7 | 1111 0111 | MOD 001 R/M |                                 | ; not used
 F7 | 1111 0111 | MOD 010 R/M | DISP-LO,DISP-HI                 | NOT REG16/MEM16
 F7 | 1111 0111 | MOD 011 R/M | DISP-LO,DISP-HI                 | NEG REG16/MEM16
 F7 | 1111 0111 | MOD 100 R/M | DISP-LO,DISP-HI                 | MUL REG16/MEM16
@@ -424,17 +424,17 @@ FC | 1111 1100 |             |                                 | CLD
 FD | 1111 1101 |             |                                 | STD
 FE | 1111 1110 | MOD 000 R/M | DISP-LO,DISP-HI                 | INC REG8/MEM8
 FE | 1111 1110 | MOD 001 R/M | DISP-LO,DISP-HI                 | DEC REG8/MEM8
-FE | 1111 1110 | MOD 010 R/M |                                 | (not used)
-FE | 1111 1110 | MOD 011 R/M |                                 | (not used)
-FE | 1111 1110 | MOD 100 R/M |                                 | (not used)
-FE | 1111 1110 | MOD 101 R/M |                                 | (not used)
-FE | 1111 1110 | MOD 110 R/M |                                 | (not used)
-FE | 1111 1110 | MOD 111 R/M |                                 | (not used)
+FE | 1111 1110 | MOD 010 R/M |                                 | ; not used
+FE | 1111 1110 | MOD 011 R/M |                                 | ; not used
+FE | 1111 1110 | MOD 100 R/M |                                 | ; not used
+FE | 1111 1110 | MOD 101 R/M |                                 | ; not used
+FE | 1111 1110 | MOD 110 R/M |                                 | ; not used
+FE | 1111 1110 | MOD 111 R/M |                                 | ; not used
 FF | 1111 1111 | MOD 000 R/M | DISP-LO,DISP-HI                 | INC MEM16
 FF | 1111 1111 | MOD 001 R/M | DISP-LO,DISP-HI                 | DEC MEM16
-FF | 1111 1111 | MOD 010 R/M | DISP-LO,DISP-HI                 | CALL REG16/MEM16 (intra)
-FF | 1111 1111 | MOD 011 R/M | DISP-LO,DISP-HI                 | CALL MEM16 (intersegment)
-FF | 1111 1111 | MOD 100 R/M | DISP-LO,DISP-HI                 | JMP REG16/MEM16 (intra)
-FF | 1111 1111 | MOD 101 R/M | DISP-LO,DISP-HI                 | JMP MEM16 (intersegment)
+FF | 1111 1111 | MOD 010 R/M | DISP-LO,DISP-HI                 | CALL REG16/MEM16 ; intrasegment
+FF | 1111 1111 | MOD 011 R/M | DISP-LO,DISP-HI                 | CALL FAR MEM16 ; intersegment
+FF | 1111 1111 | MOD 100 R/M | DISP-LO,DISP-HI                 | JMP REG16/MEM16 ; intrasegment
+FF | 1111 1111 | MOD 101 R/M | DISP-LO,DISP-HI                 | JMP FAR MEM16 ; intersegment
 FF | 1111 1111 | MOD 110 R/M | DISP-LO,DISP-HI                 | PUSH MEM16
-FF | 1111 1111 | MOD 111 R/M |                                 | (not used)
+FF | 1111 1111 | MOD 111 R/M |                                 | ; not used

@@ -10,9 +10,12 @@ set CompilerFlags=/FC /nologo /Od /WX /W4 /wd4100 /wd4101 /wd4201 /wd4189  /wd42
 set LinkerFlags=/incremental:no /opt:ref
 
 call cl %CompilerFlags% ..\sim8086.c /link %LinkerFlags%
-call cl %CompilerFlags% ..\sim8086_v2.c /link %LinkerFlags%
+@REM call cl %CompilerFlags% ..\sim8086_v2.c /link %LinkerFlags%
+@REM call cl %CompilerFlags% ..\permute.c /link %LinkerFlags%
 
-for %%f in (..\perfaware\part1\*.asm) do (
-    call nasm ..\perfaware\part1\%%~nf.asm -o %~dp0build\%%~nf
-)
+@REM call nasm ..\all.asm -o %~dp0build\all
+
+@REM for %%f in (..\perfaware\part1\*.asm) do (
+@REM     call nasm ..\perfaware\part1\%%~nf.asm -o %~dp0build\%%~nf
+@REM )
 
