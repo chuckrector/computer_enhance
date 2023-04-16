@@ -2,9 +2,26 @@
 #include <stdio.h>
 #include "sim8086.h"
 
-static u8 OpStream[1024*4] = {0};
-static op OpList[1024*4] = {0};
-static int OpCount = 0;
+static u8 OpStream[1024*4];
+static op OpList[1024*4];
+static int OpCount;
+
+typedef union
+{
+    u16 Registers[8];
+    struct
+    {
+        u16 AX;
+        u16 CX;
+        u16 DX;
+        u16 BX;
+        u16 SP;
+        u16 BP;
+        u16 SI;
+        u16 DI;
+    };
+} cpu_state;
+static cpu_state CPUState;
 
 static int IsPrefix(op *Op)
 {
@@ -1220,6 +1237,7 @@ int main(int ArgCount, char **Args)
     {
         Exec = 1;
         Filename = Args[2];
+        printf("--- %s ---\n", Filename);
     }
 
     FILE *File = fopen(Filename, "rb");
@@ -1492,8 +1510,61 @@ int main(int ArgCount, char **Args)
                     int OpBytesLength = ArrayLength(OpBytes);
                     Assert(EmitLength < OpBytesLength);
                 }
-                printf("; 0x%08llX:%s\n", (IP - OpStream), OpBytes);
+                printf("; 0x%08llX:%s", (IP - OpStream), OpBytes);
+
+                if(Exec)
+                {
+                    printf("  [exec] ");
+
+                    char Exec[1024] = {0};
+                    char *E = Exec;
+                    if((Op->ParamCount == 2) &&
+                       (Op->Param[SOURCE].Type == Param_Immediate) &&
+                       (Op->Param[DESTINATION].Type == Param_Register))
+                    {
+                        op_param *Source = &Op->Param[SOURCE];
+                        op_param *Dest   = &Op->Param[DESTINATION];
+                        E += PrintParam(E, Op, Dest);
+
+                        int ValueBefore = CPUState.Registers[Dest->RegisterOrMemoryIndex];
+                        int RegisterIndex = Dest->RegisterOrMemoryIndex;
+                        if(RegisterIndex < 8)
+                        {
+                            if(RegisterIndex < 4)
+                            {
+                                CPUState.Registers[RegisterIndex] &= ~0xff;
+                                CPUState.Registers[RegisterIndex] |= (Source->ImmediateValue & 0xff);
+                            }
+                            else
+                            {
+                                CPUState.Registers[RegisterIndex] &= ~0xff00;
+                                CPUState.Registers[RegisterIndex] |= ((Source->ImmediateValue & 0xff) << 8);
+                            }
+                        }
+                        else
+                        {
+                            RegisterIndex -= 8;
+                            CPUState.Registers[RegisterIndex] = (Source->ImmediateValue & 0xffff);
+                        }
+                        E += sprintf(E, ":0x%04X->0x%04X", ValueBefore, CPUState.Registers[RegisterIndex]);
+                    }
+                    printf("%s", Exec);
+                }
+
+                printf("\n");
             }
+        }
+    }
+
+    if(Exec)
+    {
+        printf("\nFinal registers:\n");
+        for(int RegisterIndex = 0;
+            RegisterIndex < 8;
+            ++RegisterIndex)
+        {
+            u16 Value = CPUState.Registers[RegisterIndex];
+            printf("      %s: 0x%04X (%d)\n", RegisterLookup[8 + RegisterIndex], Value, Value);
         }
     }
 
