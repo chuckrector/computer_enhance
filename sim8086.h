@@ -34,9 +34,9 @@ static char *RegisterLookup[16] =
 };
 
 #define SEGMENT_REGISTER_NAME_ES 0
-#define SEGMENT_REGISTER_NAME_CS 0
-#define SEGMENT_REGISTER_NAME_SS 0
-#define SEGMENT_REGISTER_NAME_DS 0
+#define SEGMENT_REGISTER_NAME_CS 1
+#define SEGMENT_REGISTER_NAME_SS 2
+#define SEGMENT_REGISTER_NAME_DS 3
 static char *SegmentRegisterLookup[4] =
 {
     "es",
